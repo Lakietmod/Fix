@@ -6,6 +6,8 @@ from zlapi.models import *
 import pytz
 import requests
 import json
+from core.bot_sys import get_user_name_by_id, read_settings, write_settings
+
 
 # Dữ liệu thơ theo thời gian
 time_poems = {
@@ -206,135 +208,117 @@ time_poems = {
 # Timezone Việt Nam
 vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
 
-def start_autosend_thread(bot):
-    """Khởi động thread autosend"""
-    global autosend_thread, autosend_running
-    
-    if autosend_running:
-        return
-    
-    autosend_running = True
-    autosend_thread = threading.Thread(target=autosend_task, args=(bot,), daemon=True)
-    autosend_thread.start()
-    print("✅ Autosend thread đã được khởi động!")
+def handle_autosend_on(bot, thread_id, author_id):
+    settings = read_settings(author_id)
+    if "autosend" not in settings:
+        settings["autosend"] = {}
+    settings["autosend"][thread_id] = True
+    write_settings(author_id, settings)
+    return f"🚦Lệnh autosend đã được Bật 🚀 trong nhóm này ✅"
 
-def autosend_task(bot):
-    """Task chính để gửi tin nhắn autosend"""
+def handle_autosend_off(bot, thread_id, author_id):
+    settings = read_settings(author_id)
+    if "autosend" in settings and thread_id in settings["autosend"]:
+        settings["autosend"][thread_id] = False
+        write_settings(author_id, settings)
+        return f"🚦Lệnh autosend đã Tắt ⭕️ trong nhóm này ✅"
+    return "🚦Nhóm chưa có thông tin cấu hình autosend để ⭕️ Tắt 🤗"
+
+def autosend_task(client):
     last_sent_time = {}
     
-    while autosend_running:
+    while True:
         try:
-            # Đọc settings từ bot
-            from core.bot_sys import read_settings
-            settings = read_settings(bot.uid)
-            
-            # Kiểm tra xem có nhóm nào bật autosend không
-            autosend_settings = settings.get("autosend", {})
-            if not any(autosend_settings.values()):
-                time.sleep(60)  # Chờ 1 phút nếu không có nhóm nào bật
+            author_id = client.uid
+            settings = read_settings(author_id)
+            if not settings.get("autosend"):
+                time.sleep(30)
                 continue
-            
-            # Lấy thời gian hiện tại
+                
             now = datetime.now(vn_tz)
             current_time_str = now.strftime("%H:%M")
             
-            # Kiểm tra xem có thơ cho thời gian này không
             if current_time_str in time_poems:
-                # Lấy video ngẫu nhiên
-                video_url = get_random_video()
-                if not video_url:
+                listvd = "https://raw.githubusercontent.com/trannguyen-shiniuem/trannguyen-shiniuem/main/autosend1.json"
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
+                }
+                try:
+                    response = requests.get(listvd, headers=headers, timeout=10)
+                    response.raise_for_status()
+                    urls = response.json()
+                    if not urls:
+                        raise ValueError("Danh sách video rỗng")
+                    video_url = random.choice(urls)
+                except Exception as e:
+                    print(f"❌ Lỗi khi lấy danh sách video: {e}")
                     time.sleep(30)
                     continue
                 
-                # Cấu hình video
+                try:
+                    video_check = requests.head(video_url, headers=headers, timeout=5)
+                    if video_check.status_code != 200:
+                        raise ValueError(f"Video URL không hợp lệ: {video_url}")
+                except Exception as e:
+                    print(f"❌ Video URL không khả dụng: {e}")
+                    time.sleep(30)
+                    continue
+                
                 thumbnail_url = "https://f66-zpg-r.zdn.vn/jxl/8107149848477004187/d08a4d364d8cf9d2a09d.jxl"
                 duration = '1000000'
-                
-                # Chọn thơ ngẫu nhiên
                 poem = random.choice(time_poems[current_time_str])
+                formatted_message = f"🚦{poem}\n🚦{current_time_str} - Bot: {get_user_name_by_id(client, client.uid)} Autosend"
                 
-                # Format tin nhắn
-                from core.bot_sys import get_user_name_by_id
-                bot_name = get_user_name_by_id(bot, bot.uid)
-                formatted_message = f"🚦 {poem}\n🚦 {current_time_str} - Bot: {bot_name} Autosend"
-                
-                # Gửi đến các nhóm đã bật autosend
-                for thread_id, enabled in autosend_settings.items():
+                for thread_id, enabled in settings["autosend"].items():
                     if not enabled:
                         continue
-                    
-                    # Kiểm tra thời gian gửi cuối (tránh spam)
-                    if thread_id in last_sent_time:
-                        time_diff = now - last_sent_time[thread_id]
-                        if time_diff < timedelta(minutes=30):  # Tối thiểu 30 phút giữa các lần gửi
-                            continue
-                    
-                    try:
-                        # Tạo tin nhắn
+                        
+                    if thread_id not in last_sent_time or (now - last_sent_time.get(thread_id, now) >= timedelta(minutes=1)):
                         gui = Message(text=formatted_message)
-                        
-                        # Gửi video
-                        bot.sendRemoteVideo(
-                            video_url,
-                            thumbnail_url,
-                            duration=duration,
-                            message=gui,
-                            thread_id=thread_id,
-                            thread_type=ThreadType.GROUP,
-                            width=1080,
-                            height=1920,
-                            ttl=3600000
-                        )
-                        
-                        last_sent_time[thread_id] = now
-                        print(f"✅ Đã gửi autosend đến nhóm {thread_id} lúc {current_time_str}")
-                        
-                        # Delay giữa các nhóm
-                        time.sleep(2)
-                        
-                    except Exception as e:
-                        print(f"❌ Lỗi khi gửi autosend đến nhóm {thread_id}: {e}")
-                        
+                        try:
+                            client.sendRemoteVideo(
+                                video_url,
+                                thumbnail_url,
+                                duration=duration,
+                                message=gui,
+                                thread_id=thread_id,
+                                thread_type=ThreadType.GROUP,
+                                width=1080,
+                                height=1920,
+                                ttl=3600000
+                            )
+                            last_sent_time[thread_id] = now
+                            print(f"✅ Đã gửi tin nhắn đến {thread_id}")
+                            time.sleep(0.3)
+                        except Exception as e:
+                            print(f"❌ Lỗi khi gửi tin nhắn đến {thread_id}: {e}")
+                            
         except Exception as e:
             print(f"❌ Lỗi trong autosend_task: {e}")
-        
-        # Chờ 30 giây trước khi kiểm tra lại
+            
         time.sleep(30)
 
-def get_random_video():
-    """Lấy video ngẫu nhiên từ danh sách"""
-    try:
-        # URL danh sách video
-        listvd = "https://raw.githubusercontent.com/trannguyen-shiniuem/trannguyen-shiniuem/main/autosend1.json"
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
-        }
-        
-        # Tải danh sách video
-        response = requests.get(listvd, headers=headers, timeout=10)
-        response.raise_for_status()
-        urls = response.json()
-        
-        if not urls:
-            raise ValueError("Danh sách video rỗng")
-        
-        # Chọn video ngẫu nhiên
-        video_url = random.choice(urls)
-        
-        # Kiểm tra video có khả dụng không
-        video_check = requests.head(video_url, headers=headers, timeout=5)
-        if video_check.status_code != 200:
-            raise ValueError(f"Video URL không hợp lệ: {video_url}")
-        
-        return video_url
-        
-    except Exception as e:
-        print(f"❌ Lỗi khi lấy video: {e}")
-        return None
+def start_autosend_handle(client, thread_type, message_object, message, thread_id, prefix, author_id):
+    user_message = message.replace(f"{prefix}autosend ", "").strip().lower()
+    
+    if user_message == "on":
+        response = handle_autosend_on(client, thread_id, author_id)
+        client.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
+        if not hasattr(client, 'autosend_thread'):
+            client.autosend_thread = threading.Thread(target=autosend_task, args=(client,), daemon=True)
+            client.autosend_thread.start()
+            
+    elif user_message == "off":
+        response = handle_autosend_off(client, thread_id, author_id)
+        client.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
+    else:
+        response = f"📋 Hướng dẫn sử dụng:\n{prefix}autosend on - Bật tự động gửi\n{prefix}autosend off - Tắt tự động gửi"
+        client.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
 
-def stop_autosend():
-    """Dừng autosend thread"""
-    global autosend_running
-    autosend_running = False
-    print("🛑 Autosend thread đã được dừng!")
+# Function để khởi tạo autosend thread
+def start_autosend_thread(client):
+    """Khởi tạo và chạy autosend thread"""
+    if not hasattr(client, 'autosend_thread') or not client.autosend_thread.is_alive():
+        client.autosend_thread = threading.Thread(target=autosend_task, args=(client,), daemon=True)
+        client.autosend_thread.start()
+        print("🚀 Autosend thread đã được khởi động!")

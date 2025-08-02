@@ -28,7 +28,7 @@ from PIL import Image, ImageDraw, ImageOps, ImageFont, ImageFilter, ImageEnhance
 from bs4 import BeautifulSoup
 from colorama import Style, init
 import pyfiglet
-from modules.func_autosend.pro_autosend import start_autosend_handle
+from modules.func_autosend.pro_autosend import start_autosend_handle, start_autosend_thread
 from zlapi import ZaloAPI
 from zlapi.models import Message, ThreadType, Mention
 from core.bot_sys import *
@@ -1643,6 +1643,7 @@ class bot(ZaloAPI):
         self.version ="1.0"
         self.date_update ='01/08/25'
         self.me_name = self.fetchAccountInfo().profile.displayName
+        self.init_autosend()
         self.group_info_cache = {}
         self.last_sms_times = {}
         handle_bot_admin(self)
@@ -1685,7 +1686,15 @@ class bot(ZaloAPI):
             handle_event(self, event_data, event_type)
         except Exception as e:
             logging.error(f"🚦 Lỗi khi xử lý sự kiện: {e}")
-
+            
+    def init_autosend(self):
+        """Khởi tạo autosend thread"""
+        try:
+            start_autosend_thread(self)
+            print("✅ Autosend thread đã được khởi động thành công!")
+        except Exception as e:
+            print(f"❌ Lỗi khi khởi động autosend: {e}")
+            
     def onMessage(self, mid, author_id, message, message_object, thread_id, thread_type):
         try:
             if message_object.msgType == "chat.undo":
@@ -1774,6 +1783,8 @@ class bot(ZaloAPI):
             handle_spaman_command(message_text, message_object, thread_id, thread_type, author_id, self)
         elif message_lower.startswith(f"{prefix}stkxp"):
             handle_stkxp_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}autosend"):
+            start_autosend_handle(self, thread_type, message_object, message, thread_id, prefix, author_id)
         elif message_lower.startswith(f"{prefix}group"):
             handle_group_command(message_text, message_object, thread_id, thread_type, author_id, self)
         elif message_lower.startswith(f"{prefix}qrbank"):
@@ -1921,6 +1932,7 @@ class bot(ZaloAPI):
             tim_kiem_yanhh3d(self, message_object, author_id, thread_id, thread_type, message_lower, message_text)
         else:
             print(f"No matching command found for: '{message_text}'")
+
 
 CONFIG_FILE = "config.json"
 lock = threading.Lock()
