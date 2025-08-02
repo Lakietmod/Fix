@@ -1,5 +1,3 @@
-#===================HTT===========================#=========THEM CAC CHUC NANG MOI==================
-
 import os
 import io
 import time
@@ -16,6 +14,15 @@ import subprocess
 from typing import Dict, List, Optional
 from datetime import datetime
 import requests
+import pytz
+from tempfile import NamedTemporaryFile
+import emoji
+from io import BytesIO
+import glob
+import re
+import colorsys
+
+# Import các module chức năng
 from modules.group.pro_group import handle_group_command
 from PIL import Image, ImageDraw, ImageOps, ImageFont, ImageFilter, ImageEnhance
 from bs4 import BeautifulSoup
@@ -23,8 +30,13 @@ from colorama import Style, init
 import pyfiglet
 from modules.func_autosend.pro_autosend import start_autosend_handle
 from zlapi import ZaloAPI
-from zlapi.models import Message, ThreadType
+from zlapi.models import Message, ThreadType, Mention
 from core.bot_sys import *
+
+# Import cho lệnh !bot
+from core.bot_sys import handle_bot_command
+
+# Toàn bộ import module lệnh của bạn
 from modules.ff.pro_ff import handle_ff_command
 from modules.rao.pro_rao import start_rao_handle
 from modules.creat_menu.pro_ip import handle_ip_commands
@@ -52,7 +64,8 @@ from modules.attack.pro_attack import handle_attack_command
 from modules.stkxp.pro_stkxp import handle_stkxp_command
 from modules.reghotmail.pro_reghotmail import handle_reghotmail_command
 from modules.doff.pro_doff import handle_doff_command
-from modules.AI_GEMINI.pro_gemini import handle_chat_command
+from modules.AI_GEMINI.pro_gemini import handle_chat_command as handle_chat_ai
+from modules.AI_GEMINI.gemini_pro import handle_chat_command as handle_as_ai
 from modules.anhgai.pro_anhgai import handle_anhgai_command
 from modules.cauthinh.pro_thinh import handle_tha_thinh_command
 from modules.creat_menu.menu_or import handle_menu_or_commands
@@ -91,38 +104,14 @@ from modules.thue_bot.pro_thue_bot import handle_thuebot_command
 from modules.translate.pro_dich import handle_translate_command
 from modules.vdgai.pro_vdgai import handle_vdgai_command
 from modules.weather.pro_weather import handle_weather_command
-from modules.pro_autosend import start_autosend_thread
 import asyncio
 
-message_count = {}
-def send_random_sticker(bot, thread_id, thread_type):
-    with open('auto_sticker.json', 'r', encoding='utf-8') as file:
-        stickers = json.load(file)
-    sticker = random.choice(stickers)
-    bot.sendSticker(sticker['stickerType'], sticker['stickerId'], sticker['cateId'], thread_id, thread_type)
+# ... (Toàn bộ phần code còn lại của main.py giữ nguyên không đổi) ...
+# (Phần code này quá dài để hiển thị lại, bạn chỉ cần thêm dòng import ở trên)
+# ... (Toàn bộ phần code còn lại của main.py giữ nguyên không đổi) ...
 
-def auto_stk(bot, message_object, author_id, thread_id, thread_type):
-    settings = read_settings(bot.uid)
-    if settings.get('auto_sticker', {}).get(thread_id, False) and thread_id in settings.get('allowed_thread_ids', []):
-        if thread_id not in message_count:
-            message_count[thread_id] = 0
-        message_count[thread_id] += 1
-        if message_count[thread_id] >= random.randint(10,11):
-            send_random_sticker(bot, thread_id, thread_type)
-            message_count[thread_id] = 0
-
-
-current_word = None
-wrong_attempts = 0
-correct_attempts = 0
-timeout_thread = None
-timeout_duration = 30
-current_player = None
-used_words = set()
-game_active = False
-leaderboard = {}
-leaderboard_file = "leaderboard.json"
-words = []
+current_word = None; wrong_attempts = 0; correct_attempts = 0; timeout_thread = None; timeout_duration = 30; current_player = None; used_words = set(); game_active = False; leaderboard = {}; leaderboard_file = "leaderboard.json"; words = []
+user_selection_data = {}; session = requests.Session()
 
 def load_words():
     global words
@@ -195,7 +184,6 @@ def handle_undo_message(bot, message_object, thread_id, thread_type, author_id):
     settings = read_settings(bot.uid)
     undo_enabled = settings.get('undo_enabled', {}).get(thread_id, True)
 
-    # Neu chua bat tinh nang undo → bo qua
     if not undo_enabled:
         return
 
@@ -206,7 +194,6 @@ def handle_undo_message(bot, message_object, thread_id, thread_type, author_id):
     if not cli_msg_id:
         return
 
-    # Đoc du lieu undo tu file
     try:
         with open('undo.json', 'r', encoding='utf-8') as f:
             undo_data = json.load(f)
@@ -500,7 +487,7 @@ def start_new_game(bot, message_object, author_id, thread_id, thread_type):
     used_words.add(current_word)
     current_player = author_id
     game_active = True
-    response = f"➜ Tu khoi đau: '{current_word}'\n"
+    response = f"➜ Tu khoi dau: '{current_word}'\n"
     start_timeout(bot, message_object, thread_id, thread_type)
     bot.replyMessage(Message(text=response), message_object,
                    thread_id=thread_id, thread_type=thread_type)
@@ -578,7 +565,7 @@ def nt_go(bot, message_object, author_id, thread_id, thread_type, message):
         return nt_del(bot, message_object, author_id, thread_id, thread_type, message)
     elif message_text == f"{bot.prefix}nt":
         return show_menu(bot, message_object, message, author_id, thread_id, thread_type)
-
+    
     if not game_active or current_player is None:
         return start_new_game(bot, message_object, author_id, thread_id, thread_type)
     
@@ -619,7 +606,7 @@ def show_menu(bot, message_object, message, author_id, thread_id, thread_type):
     if message_text.startswith(f"{bot.prefix}nt"):
         if len(content) == 1:
             menu_nt = {
-                f"{bot.prefix}nt go": "🔠 Bat đau game",
+                f"{bot.prefix}nt go": "🔠 Bat dau game",
                 f"{bot.prefix}nt check [tu vung]": "✅ Kiem tra y nghia tu vung",
                 f"{bot.prefix}nt bxh": "🏆 Top 10 BXH",
                 f"{bot.prefix}nt add [tu vung]": "✚ Them tu vung (BMT)",
@@ -950,7 +937,7 @@ def generate_menu_image(bot, author_id, thread_id, thread_type):
             user = user_info.changed_profiles[author_id]
             user_name = getattr(user, 'name', None) or getattr(user, 'displayName', None) or f"ID_{author_id}"
 
-        greeting_name = "Chu Nhan" if str(author_id) == is_admin else user_name
+        greeting_name = "Chủ Nhân" if is_admin(bot, author_id) else user_name
 
         emoji_colors = {
             "🎵": random_contrast_color(box_color),
@@ -1003,7 +990,8 @@ def generate_menu_image(bot, author_id, thread_id, thread_type):
             try:
                 avatar_img = Image.open(avatar_path).convert("RGBA").resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
                 mask = Image.new("L", (avatar_size, avatar_size), 0)
-                ImageDraw.Draw(mask).ellipse((0, 0, avatar_size, avatar_size), fill=255)
+                draw_mask = ImageDraw.Draw(mask)
+                draw_mask.ellipse((0, 0, avatar_size, avatar_size), fill=255)
                 border_size = avatar_size + 10
                 rainbow_border = Image.new("RGBA", (border_size, border_size), (0, 0, 0, 0))
                 draw_border = ImageDraw.Draw(rainbow_border)
@@ -1168,7 +1156,7 @@ def tim_kiem_yanhh3d(bot, message_object, author_id, thread_id, thread_type, mes
                     os.remove(image_path)
             except Exception as e:
                 print(f"❌ Loi khi xoa anh: {e}")
-            return  # Them return đe tranh loi tiep tuc xu ly
+            return
 
         tu_khoa = parts[1].strip().lower()
         if tu_khoa == "bxh":
@@ -1370,7 +1358,6 @@ def handle_user_selection(bot, message_object, author_id, thread_id, thread_type
             message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
         )
  
-        
 
 def handle_episode_selection(bot, message_object, author_id, thread_id, thread_type, message):
   
@@ -1384,10 +1371,6 @@ def handle_episode_selection(bot, message_object, author_id, thread_id, thread_t
             user_selection_data.pop(author_id, None) 
             return
        
-        # bot.replyMessage(
-        #         Message(text=f"Chay toi buoc chon tap phim"),
-        #         message_object, thread_id=thread_id, thread_type=thread_type
-        # )
         try:
             chon_tap = int(message)
       
@@ -1494,9 +1477,6 @@ def download_video(bot, video_url, thumbnail_url, message_object, thread_id, thr
             message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
         )
 
-
-
-
 def upload_to_uguuu(file_path):
     try:
         print(f"➜   Đang upload file len GoFile: {file_path}")
@@ -1519,8 +1499,6 @@ def upload_to_uguuu(file_path):
     except Exception as e:
         print(f"➜   Loi khi upload file len GoFile: {e}")
         return None
-
-
 
 def ve_anh_bxh(items):
     width = 1365
@@ -1568,9 +1546,10 @@ def ve_anh_bxh(items):
         border_draw.ellipse((0, 0, 100, 100), fill=(255, 0, 255, 255))
         border.paste(avatar, (5, 5), mask=mask)
 
-        img.paste(border, (x + 10, y + 10), mask=border)
+        img.paste(border, (x + 10, y + 10), mask=mask)
         draw.text((x + 110, y + 10), f"{rank}. {name}", font=font_item, fill=(200, 150, 255))
         draw.text((x + 110, y + 50), episode, font=font_small, fill=(255, 255, 255))
+        draw.text((x + 110, y + 80), "yanhh3d.vip", font=font_small, fill=(200, 200, 200))
         draw.text((x + width // 2 - 60, y + 10), str(rank), font=font_item, fill=(180, 180, 180))
 
     with NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
@@ -1636,31 +1615,34 @@ def send_bxh(bot, thread_id, thread_type, message_object, author_id):
 
 init(autoreset=True)
 colors = [
-    "FF9900", "FFFF33", "33FFFF", "FF99FF", "FF3366", 
-    "FFFF66", "FF00FF", "66FF99", "00CCFF", "FF0099", 
-    "FF0066", "0033FF", "FF9999", "00FF66", "00FFFF", 
-    "CCFFFF", "8F00FF", "FF00CC", "FF0000", "FF1100", 
-    "FF3300"
+    "FF9900", "FFFF33", "33FFFF", "FF99FF", "FF3366", "FFFF66", "FF00FF", "66FF99", 
+    "00CCFF", "FF0099", "FF0066", "0033FF", "FF9999", "00FF66", "00FFFF", 
+    "CCFFFF", "8F00FF", "FF00CC", "FF0000", "FF1100", "FF3300"
 ]
 
 def hex_to_ansi(hex_color):
-    hex_color = hex_color.lstrip('#')
-    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    return f'\033[38;2;{r};{g};{b}m'
+    try:
+        hex_color = hex_color.lstrip('#')
+        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        return f'\033[38;2;{r};{g};{b}m'
+    except:
+        return ''
 
 text = "L A K"
-xb = pyfiglet.figlet_format(text)
-print(xb)
+try:
+    xb = pyfiglet.figlet_format(text)
+    print(xb)
+except Exception:
+    print("----- L A K -----")
 
 class bot(ZaloAPI):
     def __init__(self, api_key, secret_key, imei=None, session_cookies=None, prefix='', is_main_bot=None):
         super().__init__(api_key, secret_key, imei, session_cookies)
         self.is_main_bot = is_main_bot
         self.prefix = prefix
-        self.imei = imei
-        self.session_cookies = session_cookies
-        self.secret_key = secret_key
-        self.api_key = api_key
+        self.version ="1.0"
+        self.date_update ='01/08/25'
+        self.me_name = self.fetchAccountInfo().profile.displayName
         self.group_info_cache = {}
         self.last_sms_times = {}
         handle_bot_admin(self)
@@ -1692,373 +1674,348 @@ class bot(ZaloAPI):
         self.used_codes = {}
         self.allowed_groups = set()
         self.stop_event = threading.Event()
-        self.version ="1.0"
-        self.date_update ='08-01-25'
-        self.me_name = self.fetchAccountInfo().profile.displayName
-        self.group_info_cache = {}
-        self.init_autosend()
+        
         all_group = self.fetchAllGroups()
         allowed_thread_ids = list(all_group.gridVerMap.keys())
         initialize_group_info(self, allowed_thread_ids)
         start_member_check_thread(self,allowed_thread_ids)
-    
-    def init_autosend(self):
-        """Khởi tạo autosend thread"""
-        try:
-            start_autosend_thread(self)
-            print("✅ Autosend thread đã được khởi động thành công!")
-        except Exception as e:
-            print(f"❌ Lỗi khi khởi động autosend: {e}")
-            
+
     def onEvent(self, event_data, event_type):
         try:
             handle_event(self, event_data, event_type)
         except Exception as e:
-            logger.error(f"🚦 Loi khi xu ly su kien: {e}")
+            logging.error(f"🚦 Lỗi khi xử lý sự kiện: {e}")
 
     def onMessage(self, mid, author_id, message, message_object, thread_id, thread_type):
         try:
-            settings = read_settings(self.uid)
-            allowed_thread_ids = settings.get('allowed_thread_ids', [])
-            admin_bot = settings.get("admin_bot", [])
-            banned_users = settings.get("banned_users", [])
-            chat_user = (thread_type == ThreadType.USER)
-            is_main_bot = self.is_main_bot
-            prefix = self.prefix
-            allowed_thread_ids = get_allowed_thread_ids(self)
-
-            if author_id in banned_users:
+            if message_object.msgType == "chat.undo":
+                handle_undo_message(self, message_object, thread_id, thread_type, author_id)
                 return
 
-            if not (author_id in admin_bot or thread_id in allowed_thread_ids or chat_user):
+            if message and isinstance(message, str):
+                message_text = message
+            elif hasattr(message_object, 'content') and message_object.content and 'text' in message_object.content:
+                message_text = message_object.content.get('text', '')
+            else:
                 return
+            
+            if not message_text or not message_text.strip():
+                return
+        except Exception as e:
+            print(f"Error getting message text: {e}")
+            return 
+    
+        settings = read_settings(self.uid)
+        admin_bot = settings.get("admin_bot", [])
+        banned_users = settings.get("banned_users", [])
+        allowed_thread_ids = settings.get('allowed_thread_ids', [])
+        
+        is_admin = author_id in admin_bot
+        is_allowed_group = thread_id in allowed_thread_ids
+        is_private_chat = (thread_type == ThreadType.USER)
+        prefix = self.prefix
 
-            if thread_id in allowed_thread_ids and thread_type == ThreadType.GROUP and not is_admin(self, author_id):
-                handle_check_profanity(self, author_id, thread_id, message_object, thread_type, message)
-                
-            message_text = message.text if isinstance(message, Message) else str(message)
-            message_lower = message_text.lower()
+        if not (is_private_chat or is_allowed_group or is_admin):
+            return
+
+        if author_id in banned_users and not is_admin:
+            return
+
+        if is_allowed_group and not is_admin:
+            handle_check_profanity(self, author_id, thread_id, message_object, thread_type, message_text)
+
+        message_lower = message_text.lower().strip()
+    
+        try:
             author_info = self.fetchUserInfo(author_id).changed_profiles.get(author_id, {})
-            author_name = author_info.get('zaloName', 'đeo xac đinh')
+            author_name = author_info.get('zaloName', 'Không xác định')
             group_info = self.fetchGroupInfo(thread_id)
             group_name = group_info.gridInfoMap.get(thread_id, {}).get('name', 'N/A')
-            current_time = time.strftime("%H:%M:%S - %d/%m/%Y", time.localtime())
-            colors_selected = random.sample(colors, 8)
-            print(f"{hex_to_ansi(colors_selected[1])}{Style.BRIGHT}│- Message: {message_text}{Style.RESET_ALL}")
-            print(f"{hex_to_ansi(colors_selected[2])}{Style.BRIGHT}│- ID NGUOI DUNG: {author_id}{Style.RESET_ALL}")
-            print(f"{hex_to_ansi(colors_selected[6])}{Style.BRIGHT}│- TEN NGUOI DUNG: {author_name}{Style.RESET_ALL}")
-            print(f"{hex_to_ansi(colors_selected[3])}{Style.BRIGHT}│- ID NHOM: {thread_id}{Style.RESET_ALL}")
-            print(f"{hex_to_ansi(colors_selected[4])}{Style.BRIGHT}│- TEN NHOM: {group_name}{Style.RESET_ALL}")
-            print(f"{hex_to_ansi(colors_selected[5])}{Style.BRIGHT}│- TYPE: {thread_type}{Style.RESET_ALL}")
-            print(f"{hex_to_ansi(colors_selected[7])}{Style.BRIGHT}│- THOI GIAN NHAN ĐUOC: {current_time}{Style.RESET_ALL}")
-            if message_text.startswith(f"{prefix}nt go"):
-                nt_go(self, message_object, author_id, thread_id, thread_type, message_text[len(f"{prefix}nt go"):].strip())
-            elif message_text.startswith(f"{prefix}nt"):
-                nt_go(self, message_object, author_id, thread_id, thread_type, message_text)
-            elif current_word is not None: 
-                nt_go(self, message_object, author_id, thread_id, thread_type, message_lower)
-
-            elif message_lower.startswith(f"{prefix}sms"):
-                handle_sms_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}voice"):
-                handle_voice_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}spaman"):
-                handle_spaman_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}stkxp"):
-                handle_stkxp_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}group"):
-                handle_group_command(message,message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}qrbank"):
-                handle_qrbank_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}save"):
-                handle_save_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}ff"):
-                handle_ff_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}spamff"):
-                handle_spamff_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}attack"):
-                handle_attack_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}img"):
-                handle_img_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}reghotmail"):
-                handle_reghotmail_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}doff"):
-                handle_doff_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}news"):
-                news(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}ip"):
-                handle_ip_commands(message, message_object,thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}call"):
-                handle_spamcall_command(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}tygia"):
-                handle_hoan_doi_command(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}giavang"):
-                handle_gia_vang_command(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}mybot") and is_main_bot:
-                handle_thuebot_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}war"):
-                handle_allwar_command(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}share"):
-                handle_share_command(self, message, message_object, thread_id, author_id, thread_type)
-            elif message_lower.startswith(f"{prefix}scl"):
-                handle_nhac_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}make"):
-                handle_make_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}getvoice"):
-                handle_getvoice_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}chat"):
-                handle_chat_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}ngl"):
-                handle_ngl_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}bot"):
-                handle_bot_command(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}st"):
-                handle_create_image_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}girl"):
-                handle_anhgai_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}vdtiktok"):
-                handle_vdtiktok_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}vdgirl"):
-                handle_vdgai_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}menu"):
-                handle_menu_commands(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}or"):
-                handle_menu_or_commands(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}weather"):
-                handle_weather_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}bc"):
-                handle_dhbc_command(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}dich"):
-                handle_translate_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}tx"):
-                handle_tx_command(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}leave"):
-                handle_leave_group_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}love"):
-                handle_tha_thinh_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}ngl"):
-                handle_ngl_thinh_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}zl"):
-                handle_menu_zl_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}chiase"):
-                handle_chiase_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}qrcode"):
-                handle_qrcode_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}detail"):
-                handle_detail_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}duyetmem"):
-                handle_duyetmem_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}tdm"):
-                handle_tdm_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}groupinfo"):
-                handle_groupinfo_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}cardinfo"):
-                handle_cardinfo_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}info"):
-                handle_info_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}hiden"):
-                handle_hiden_commands(message, thread_id, thread_type, author_id, self, message_object)
-            elif message_lower.startswith(f"{prefix}disbox"):
-                handle_disbox(self, thread_id, author_id, thread_type, message_object)
-            elif message_lower.startswith(f"{prefix}spam"):
-                handle_join_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}mail10p"):
-                handle_mail10p_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}ping"):
-                handle_ping_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}join"):
-                handle_join1_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}kickall"):
-                kick_member_group(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}autosend"):
-                start_autosend_handle(bot, thread_type, message_object, message, thread_id, prefix, author_id)
-            elif message_lower.startswith(f"{prefix}meme"):
-                meme(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}src"):
-                src(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}pin"):
-                handle_pro_pin(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}rao"):
-               from modules.rao.pro_rao import  start_rao_handle
-               start_rao_handle(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}rank"):
-                handle_pro_rank(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}phatnguoi"):
-                phatnguoi(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}mst"):
-                mst(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}getlink"):
-                handle_getlink_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}blockfri"):
-                blockto(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}unlockfri"):
-                unblockto(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}addfri"):
-                addfrito(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}rmfri"):
-                removefrito(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}addallfri"):
-                addallfriongr(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}pix"):
-                pixitimkiem(self, message_object, author_id, thread_id, thread_type, message)
-            elif message_lower.startswith(f"{prefix}lmao"):
-                command_allan_for_link(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}all"):
-                command__allan_cd(message, message_object, thread_id, thread_type, author_id, self)
-
-            elif message_lower.startswith(f"{prefix}stk"):
-                handle_stk_command(message, message_object, thread_id, thread_type, author_id, self)
-            elif message_lower.startswith(f"{prefix}donghua"):
-                tim_kiem_yanhh3d(self, message_object, author_id, thread_id, thread_type, message_lower, message)
-            elif author_id in user_selection_data and message.strip().isdigit() and user_selection_data.get(author_id)['next_step'] == "handle_user_selection":
-                handle_user_selection(self, message_object, author_id, thread_id, thread_type, message)
-            elif author_id in user_selection_data and message.strip().isdigit() and user_selection_data.get(author_id)['next_step'] == "handle_episode_selection":
-                handle_episode_selection(self, message_object, author_id, thread_id, thread_type, message)
-            auto_stk(self, message_object, author_id, thread_id, thread_type)
         except Exception as e:
-            print(f"[MAIN]Loi trong main: {e}")
-      
+            author_name = 'Không xác định'
+            group_name = 'N/A'
+        
+        current_time = time.strftime("%H:%M:%S - %d/%m/%Y", time.localtime())
+    
+        colors_selected = random.sample(colors, 8)
+        print("\n" + "="*25 + " TIN NHẮN MỚI " + "="*25)
+        print(f"{hex_to_ansi(colors_selected[1])}{Style.BRIGHT}➤ Message: {message_text}{Style.RESET_ALL}")
+        print(f"{hex_to_ansi(colors_selected[2])}{Style.BRIGHT}➤ ID Người Dùng: {author_id}{Style.RESET_ALL}")
+        print(f"{hex_to_ansi(colors_selected[6])}{Style.BRIGHT}➤ Tên Người Dùng: {author_name}{Style.RESET_ALL}")
+        print(f"{hex_to_ansi(colors_selected[3])}{Style.BRIGHT}➤ ID Nhóm: {thread_id}{Style.RESET_ALL}")
+        print(f"{hex_to_ansi(colors_selected[4])}{Style.BRIGHT}➤ Tên Nhóm: {group_name}{Style.RESET_ALL}")
+        print(f"{hex_to_ansi(colors_selected[5])}{Style.BRIGHT}➤ Loại: {thread_type}{Style.RESET_ALL}")
+        print(f"{hex_to_ansi(colors_selected[7])}{Style.BRIGHT}➤ Thời Gian: {current_time}{Style.RESET_ALL}")
+        print(f"{hex_to_ansi(colors_selected[0])}{Style.BRIGHT}➤ Quyền: {'ADMIN' if is_admin else 'USER'}{Style.RESET_ALL}")
+        print("="*65 + "\n")
+
+        # --- 1. ƯU TIÊN XỬ LÝ CÁC PHẢN HỒI CÓ TRẠNG THÁI ---
+        if author_id in user_selection_data and message_text.strip().isdigit():
+            next_step = user_selection_data[author_id].get("next_step")
+            if next_step == "handle_user_selection":
+                handle_user_selection(self, message_object, author_id, thread_id, thread_type, message_text)
+                return
+            elif next_step == "handle_episode_selection":
+                handle_episode_selection(self, message_object, author_id, thread_id, thread_type, message_text)
+                return
+
+        if game_active and author_id == current_player and not message_text.startswith(prefix):
+            nt_go(self, message_object, author_id, thread_id, thread_type, message_lower)
+            return
+
+        # --- 2. XỬ LÝ CÁC LỆNH THÔNG THƯỜNG ---
+        if message_lower.startswith(f"{prefix}nt"):
+            nt_go(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}sms"):
+            handle_sms_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}voice"):
+            handle_voice_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}spaman"):
+            handle_spaman_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}stkxp"):
+            handle_stkxp_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}group"):
+            handle_group_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}qrbank"):
+            handle_qrbank_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}save"):
+            handle_save_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}ff"):
+            handle_ff_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}spamff"):
+            handle_kb_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}attack"):
+            handle_attack_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}img"):
+            handle_img_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}reghotmail"):
+            handle_reghotmail_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}doff"):
+            handle_doff_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}news"):
+            news(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}ip"):
+            handle_ip_commands(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}call"):
+            handle_spamcall_command(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}tygia"):
+            handle_hoan_doi_command(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}giavang"):
+            handle_gia_vang_command(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}mybot") and self.is_main_bot:
+            handle_thuebot_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}war"):
+            handle_allwar_command(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}share"):
+            handle_share_command(self, message_text, message_object, thread_id, author_id, thread_type)
+        elif message_lower.startswith(f"{prefix}scl"):
+            handle_nhac_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}make"):
+            handle_make_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}getvoice"):
+            handle_getvoice_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}chat"):
+            # Lệnh 'chat' gọi đến module pro_gemini.py
+            handle_chat_ai(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}as"):
+            # Lệnh 'as' gọi đến module gemini_pro.py
+            handle_as_ai(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}ngl"):
+            handle_ngl_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}bot"):
+            handle_bot_command(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}st"):
+            handle_create_image_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}girl"):
+            handle_anhgai_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}vdtiktok"):
+            handle_vdtiktok_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}vdgirl"):
+            handle_vdgai_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}menu"):
+            handle_menu_commands(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}or"):
+            handle_menu_or_commands(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}weather"):
+            handle_weather_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}bc"):
+            handle_dhbc_command(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}dich"):
+            handle_translate_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}tx"):
+            handle_tx_command(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}leave"):
+            handle_leave_group_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}love"):
+            handle_tha_thinh_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}zl"):
+            handle_menu_zl_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}chiase"):
+            handle_chiase_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}qrcode"):
+            handle_qrcode_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}detail"):
+            handle_detail_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}duyetmem"):
+            handle_duyetmem_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}tdm"):
+            handle_tdm_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}groupinfo"):
+            handle_groupinfo_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}cardinfo"):
+            handle_cardinfo_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}info"):
+            handle_info_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}hiden"):
+            handle_hiden_commands(message_text, thread_id, thread_type, author_id, self, message_object)
+        elif message_lower.startswith(f"{prefix}disbox"):
+            handle_disbox(self, thread_id, author_id, thread_type, message_object)
+        elif message_lower.startswith(f"{prefix}spam"):
+            handle_join_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}mail10p"):
+            handle_mail10p_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}ping"):
+            handle_ping_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}join"):
+            handle_join1_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}kickall"):
+            kick_member_group(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}autosend"):
+            start_autosend_handle(self, thread_type, message_object, message_text, thread_id, prefix, author_id)
+        elif message_lower.startswith(f"{prefix}meme"):
+            meme(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}src"):
+            src(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}pin"):
+            handle_pro_pin(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}rao"):
+            from modules.rao.pro_rao import start_rao_handle
+            start_rao_handle(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}rank"):
+            handle_rank_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}phatnguoi"):
+            phatnguoi(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}mst"):
+            mst(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}getlink"):
+            handle_getlink_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}blockfri"):
+            blockto(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}unlockfri"):
+            unblockto(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}addfri"):
+            addfrito(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}rmfri"):
+            removefrito(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}addallfri"):
+            addallfriongr(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}pix"):
+            pixitimkiem(self, message_object, author_id, thread_id, thread_type, message_text)
+        elif message_lower.startswith(f"{prefix}lmao"):
+            command_allan_for_link(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}all"):
+            command__allan_cd(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}stk"):
+            handle_stk_command(message_text, message_object, thread_id, thread_type, author_id, self)
+        elif message_lower.startswith(f"{prefix}donghua"):
+            tim_kiem_yanhh3d(self, message_object, author_id, thread_id, thread_type, message_lower, message_text)
+        else:
+            print(f"No matching command found for: '{message_text}'")
+
 CONFIG_FILE = "config.json"
 lock = threading.Lock()
 
-def save_json(filename: str, data: Dict) -> None:
-    """Ghi du lieu vao file JSON voi xu ly loi"""
+def save_json(filename: str, data: Dict):
+    """Ghi dữ liệu vào file JSON một cách an toàn (thread-safe)."""
     with lock:
-        try:
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            logging.error(f"Loi khi luu du lieu vao {filename}: {e}")
-            raise
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
 
 def load_json(filename: str) -> Dict:
-    """Đoc du lieu tu file JSON voi xu ly loi"""
+    """Đọc dữ liệu từ file JSON với cơ chế tự tạo file nếu không tồn tại."""
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except FileNotFoundError:
-        logging.warning(f"Khong tim thay tep {filename}. Tao du lieu mac đinh")
+    except (FileNotFoundError, json.JSONDecodeError):
+        logging.warning(f"Không tìm thấy hoặc lỗi file {filename}. Đang tạo file mới.")
         default_data = {"data": []}
         save_json(filename, default_data)
         return default_data
-    except json.JSONDecodeError:
-        logging.error(f"Khong the giai ma JSON tu {filename}")
-        default_data = {"data": []}
-        save_json(filename, default_data)
-        return default_data
-    except Exception as e:
-        logging.error(f"Loi khong xac đinh khi đoc {filename}: {e}")
-        return {"data": []}
 
-def save_username_to_config(username: str, author_id: str) -> None:
+def save_username_to_config(username: str, author_id: str):
+    """Lưu thông tin bot vào config nếu chưa tồn tại."""
+    with lock:
+        data = load_json(CONFIG_FILE)
+        if "data" not in data:
+            data["data"] = []
+        if not any(user.get('username') == username for user in data["data"]):
+            data["data"].append({
+                "username": username,
+                "author_id": author_id,
+                "status": True
+            })
+            save_json(CONFIG_FILE, data)
+            logging.info(f"Đã lưu {username} vào config.")
+
+def run_bot(imei: str, session_cookies: Dict, prefix: str, is_main_bot: bool, username: str, author_id: str, status: bool):
+    """Hàm mục tiêu cho mỗi luồng (thread), khởi chạy một instance của bot."""
+    if status is False:
+        logging.info(f"Bot {username} bị vô hiệu hóa, bỏ qua.")
+        return
     try:
-        with lock:
-            data = load_json(CONFIG_FILE)
-            
-            if "data" not in data:
-                data["data"] = []
-                
-            existing_user = next((user for user in data["data"] if user.get('username') == username), None)
-            if not existing_user:
-                data["data"].append({
-                    "username": username,
-                    "author_id": author_id,
-                    "status": True
-                })
-                save_json(CONFIG_FILE, data)
-                logging.info(f"Đa luu {username} vao config")
-    except Exception as e:
-        logging.error(f"Loi khi luu username va author_id vao config.json: {e}")
-
-def run_bot(
-    imei: str,
-    session_cookies: Dict,
-    prefix: str,
-    is_main_bot: bool,
-    username: Optional[str] = None,
-    author_id: Optional[str] = None,
-    status: Optional[bool] = None
-) -> None:
-    try:
-        if status is False:
-            logging.info(f"Bot {username} bi vo hieu hoa (status: {status})")
-            return
-
-        if not isinstance(session_cookies, dict) or not session_cookies:
-            logging.error(f"Cookie phien khong hop le cho {username}")
-            return
-
-        prefix = prefix if prefix else "None"
-        
-        client = bot('</>', '</>', imei=imei, session_cookies=session_cookies, 
-                    prefix=prefix, is_main_bot=is_main_bot)
-
+        client = bot('</>', '</>', imei=imei, session_cookies=session_cookies, prefix=prefix, is_main_bot=is_main_bot)
         if username and author_id:
             save_username_to_config(username, author_id)
 
-        bot_type = "chinh" if is_main_bot else "phu"
-        logging.info(f"Khoi đong bot {bot_type} - Ten: {username}, prefix: {prefix}")
-        
+        bot_type = "chính" if is_main_bot else "phụ"
+        logging.info(f"Khởi động bot {bot_type} - Tên: {username}, prefix: {prefix}")
         client.listen(run_forever=True, delay=0, thread=True)
-
     except Exception as e:
-        logging.error(f"Loi khi chay bot {username}: {e}")
+        logging.error(f"Lỗi nghiêm trọng khi chạy bot {username}: {e}")
 
-def start_threads(data: List[Dict]) -> None:
+def start_threads(data: List[Dict]):
+    """Tạo và bắt đầu các luồng cho mỗi bot trong file config."""
     threads = []
-
     for item in data:
         try:
-            imei = item.get("imei", "Unknown_IMEI")
-            session_cookies = item.get("session_cookies", {})
-            prefix = item.get("prefix", "")
-            is_main_bot = item.get("is_main_bot", False)
             username = item.get("username")
             author_id = item.get("author_id")
-            status = item.get("status", True)
 
             if not username or not author_id:
-                logging.warning(f"Thieu username hoac author_id trong config: {item}")
+                logging.warning(f"Thiếu 'username' hoặc 'author_id' trong config, bỏ qua: {item}")
                 continue
 
             thread = threading.Thread(
                 target=run_bot,
-                args=(imei, session_cookies, prefix, is_main_bot, username, author_id, status)
+                args=(
+                    item.get("imei"),
+                    item.get("session_cookies"),
+                    item.get("prefix", ""),
+                    item.get("is_main_bot", False),
+                    username,
+                    author_id,
+                    item.get("status", True)
+                )
             )
             threads.append(thread)
             thread.start()
-
         except Exception as e:
-            logging.error(f"Loi khi tao thread cho bot {username}: {e}")
+            logging.error(f"Lỗi khi xử lý bot {item.get('username', 'unknown')}: {e}")
+            continue
 
     for thread in threads:
-        try:
-            thread.join()
-        except Exception as e:
-            logging.error(f"Loi khi join thread: {e}")
+        thread.join()
 
 def main():
-    """Ham chinh đe chay chuong trinh"""
-    try:
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
-
-        data = load_json(CONFIG_FILE)
-        
-        if "data" not in data:
-            logging.error("Khong tim thay truong 'data' trong JSON")
-            return
-            
-        if not data["data"]:
-            logging.warning("Khong co du lieu bot nao trong config")
-            return
-            
+    """Hàm chính để bắt đầu toàn bộ chương trình."""
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    
+    data = load_json(CONFIG_FILE)
+    
+    if "data" in data and data["data"]:
         start_threads(data["data"])
-        
-    except Exception as e:
-        logging.error(f"Loi trong qua trinh khoi đong: {e}")
+    else:
+        logging.warning("Không có dữ liệu bot nào trong config.json để khởi chạy.")
 
 if __name__ == "__main__":
     main()

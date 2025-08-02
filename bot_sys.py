@@ -1,3 +1,4 @@
+# File: bot_sys.py (Đã sửa A-Z)
 
 import colorsys
 from datetime import datetime, timedelta
@@ -23,12 +24,50 @@ from zlapi.models import *
 import json
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+# ============== DÒNG IMPORT GÂY LỖI VÒNG TRÒN ĐÃ BỊ XÓA KHỎI ĐÂY ==============
+
 BACKGROUND_PATH = "background/"
 CACHE_PATH = "modules/cache/"
 OUTPUT_IMAGE_PATH = os.path.join(CACHE_PATH, "bot.png")
 SETTING_FILE = 'setting.json'
 LOG_FILE = 'logs.json'
 MUTED_MESSAGES_FILE = 'muted_messages.json'
+
+autostk_loops = {}
+
+def sticker_loop(bot, thread_id, thread_type):
+    stop_event = autostk_loops.get(thread_id)
+    if not stop_event:
+        return
+
+    try:
+        with open('auto_sticker.json', 'r', encoding='utf-8') as f:
+            stickers = json.load(f)
+        if not stickers:
+            bot.sendMessage("Lỗi: Tệp auto_sticker.json trống hoặc không tồn tại. Vui lòng kiểm tra lại.", thread_id, thread_type)
+            return
+    except Exception as e:
+        bot.sendMessage(f"Lỗi khi đọc file sticker: {e}", thread_id, thread_type)
+        return
+
+    while not stop_event.is_set():
+        try:
+            sticker1 = random.choice(stickers)
+            bot.sendSticker(sticker1['stickerType'], sticker1['stickerId'], sticker1['cateId'], thread_id, thread_type, ttl=30000)
+
+            time.sleep(30)
+
+            if stop_event.is_set():
+                break
+
+            sticker2 = random.choice(stickers)
+            bot.sendSticker(sticker2['stickerType'], sticker2['stickerId'], sticker2['cateId'], thread_id, thread_type)
+            
+            time.sleep(1)
+
+        except Exception as e:
+            print(f"[ERROR] Lỗi trong vòng lặp sticker cho thread {thread_id}: {e}")
+            time.sleep(10)
 
 def read_settings(uid):
     data_file_path = os.path.join(f"{uid}_{SETTING_FILE}")
@@ -957,7 +996,7 @@ def get_group_admins(bot, thread_id):
         admin_ids = group_info.gridInfoMap[thread_id].get('adminIds', [])
         creator_id = group_info.gridInfoMap[thread_id].get('creatorId', None)
 
-        if not admin_ids:
+        if not admin_ids and not creator_id:
             return "📌 Khong co admin trong nhom."
 
         result = "🚀 Danh sach admin trong nhom:\n"
@@ -966,8 +1005,9 @@ def get_group_admins(bot, thread_id):
             result += f"👑 {creator_name}\n"
 
         for admin_id in admin_ids:
-            user_name = get_user_name_by_id(bot, admin_id)
-            result += f"🔹 {user_name}\n"
+            if admin_id != creator_id:
+                user_name = get_user_name_by_id(bot, admin_id)
+                result += f"🔹 {user_name}\n"
         return result
     except Exception as e:
         return f"❌ Đa xay ra loi khi lay danh sach admin: {str(e)}"
@@ -1019,7 +1059,7 @@ def list_bots(bot, thread_id):
         f"{status_icon(video_enabled)} Anti-Video ▶️\n"
         f"{status_icon(card_enabled)} Anti-Card 🛡️\n"
         f"{status_icon(file_enabled)} Anti-File 🗂️\n"
-        f"{status_icon(image_enabled)} Anti-Photo 🏖\n"
+        f"{status_icon(image_enabled)} Anti-Photo 🏖"
         f"{status_icon(chat_enabled)} SafeMode 🩹\n"
         f"{status_icon(voice_enabled)} Anti-Voice 🔊\n"
         f"{status_icon(sticker_enabled)} Anti-Sticker 😊\n"
@@ -1030,9 +1070,33 @@ def list_bots(bot, thread_id):
     )
     return response
 
+last_reload_time = {}
+
 def reload_modules(self, message_object, thread_id: Optional[str], thread_type: Optional[str]):
     if thread_id is None or thread_type is None:
         raise ValueError("thread_id and thread_type must be provided")
+
+    # Kiểm tra cooldown reload
+    current_time = time.time()
+    if thread_id in last_reload_time:
+        time_diff = current_time - last_reload_time[thread_id]
+        if time_diff < 30:  # Cooldown 30 giây cho mỗi nhóm
+            remaining = int(30 - time_diff)
+            self.sendMessage(
+                Message(text=f"⏳ Vui lòng đợi {remaining}s nữa trước khi reload lại."),
+                thread_id=thread_id,
+                thread_type=thread_type
+            )
+            return
+
+    last_reload_time[thread_id] = current_time
+    
+    # Thông báo bắt đầu reload
+    self.sendMessage(
+        Message(text="🔄 Đang tiến hành reload modules..."),
+        thread_id=thread_id,
+        thread_type=thread_type
+    )
 
     current_modules = [name for name in sys.modules.keys() if name.startswith("modules.")]
     
@@ -1144,7 +1208,7 @@ def download_avatar(avatar_url, save_path=os.path.join(CACHE_PATH, "user_avatar.
     except Exception as e:
         print(f"❌ Loi tai avatar: {e}")
     return None
-
+#
 def generate_menu_image(bot, author_id, thread_id, thread_type):
     images = glob.glob(os.path.join(BACKGROUND_PATH, "*.jpg")) + \
              glob.glob(os.path.join(BACKGROUND_PATH, "*.png")) + \
@@ -1395,13 +1459,6 @@ def generate_menu_image(bot, author_id, thread_id, thread_type):
         print(f"❌ Loi xu ly anh menu: {e}")
         return None
 
-def get_user_name_by_id(bot, author_id):
-    try:
-        user_info = bot.fetchUserInfo(author_id).changed_profiles[author_id]
-        return user_info.zaloName or user_info.displayName
-    except Exception as e:
-        return "Unknown User"
-
 def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, command):
     def send_bot_response():
         settings = read_settings(bot.uid)
@@ -1509,18 +1566,46 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                 elif action == 'autostk':
                     if not is_admin(bot, author_id):
                         response = "❌ Ban khong phai admin bot!"
-                    elif len(parts) < 3:
-                        response = f"➜ Vui long nhap [on/off] sau lenh: bot autostk 🤧\n➜ Vi du: {bot.prefix}bot autostk on hoac {bot.prefix}bot autostk off ✅"
                     else:
-                        stk_action = parts[2].lower()
-                        if stk_action in ['on', 'off']:
-                            settings.setdefault('auto_sticker', {})
-                            settings['auto_sticker'][thread_id] = (stk_action == 'on')
-                            status = "bat 🟢" if stk_action == 'on' else "tat 🔴"
-                            response = f"➜ Tinh nang tu đong gui sticker đa đuoc {status}"
-                            write_settings(bot.uid, settings)
+                        sub_action = parts[2].lower() if len(parts) > 2 else None
+                        if sub_action == 'start':
+                            if thread_id in autostk_loops and not autostk_loops[thread_id].is_set():
+                                response = "Tính năng auto sticker liên tục đã được bật từ trước."
+                            else:
+                                stop_event = threading.Event()
+                                autostk_loops[thread_id] = stop_event
+                                loop_thread = threading.Thread(target=sticker_loop, args=(bot, thread_id, thread_type))
+                                loop_thread.daemon = True
+                                loop_thread.start()
+                                response = "✅ Đã BẬT tính năng auto sticker liên tục."
+                        elif sub_action == 'stop':
+                            if thread_id in autostk_loops and not autostk_loops[thread_id].is_set():
+                                autostk_loops[thread_id].set()
+                                response = "⏹️ Đã TẮT tính năng auto sticker liên tục."
+                            else:
+                                response = "Tính năng này chưa được bật."
                         else:
-                            response = f"➜ Lenh bot autostk {stk_action} khong hop le 🤧"
+                            response = f"Cú pháp không hợp lệ. Sử dụng:\n{bot.prefix}bot autostk start\n{bot.prefix}bot autostk stop"
+                # =================== BỔ SUNG KHỐI LỆNH BỊ THIẾU ===================
+                elif action == 'autosend':
+                    if not is_admin(bot, author_id):
+                        response = "❌ Bạn không phải admin bot!"
+                    elif len(parts) < 3:
+                        response = f"➜ Vui lòng nhập [on/off] sau lệnh: {bot.prefix}bot autosend 🤧"
+                    else:
+                        sub_action = parts[2].lower()
+                        if sub_action == 'on':
+                            response = handle_autosend_on(bot, thread_id, bot.prefix)
+                            # Bắt đầu luồng nếu nó chưa chạy
+                            if not hasattr(bot, 'autosend_thread_started') or not bot.autosend_thread_started:
+                                bot.autosend_thread = threading.Thread(target=autosend_task, args=(bot,), daemon=True)
+                                bot.autosend_thread.start()
+                                bot.autosend_thread_started = True
+                        elif sub_action == 'off':
+                            response = handle_autosend_off(bot, thread_id, bot.prefix)
+                        else:
+                            response = "➜ Lệnh không hợp lệ. Vui lòng chọn 'on' hoặc 'off'."
+                # =====================================================================
 
                 elif action == 'policy':
                     if thread_type != ThreadType.GROUP:
@@ -2208,6 +2293,7 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                         elif sub_action == 'list':
                             response = list_banned_users(bot)
 
+
                 else:
                     bot.sendReaction(message_object, "❌", thread_id, thread_type)
             
@@ -2305,29 +2391,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
 
     thread = Thread(target=send_bot_response)
     thread.start()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 font_path_emoji = os.path.join("emoji.ttf")
 font_path_arial = os.path.join("arial unicode ms.otf")
