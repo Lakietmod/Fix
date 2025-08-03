@@ -23,7 +23,33 @@ import requests
 from zlapi.models import *
 import json
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import os
+import json
+import time
+import threading
+import logging
+import random
+import pytz
+import colorsys
+import glob
+import requests
+from typing import Dict, List, Optional, Any, Tuple
+from datetime import datetime
+from zlapi import ZaloAPI
+from zlapi.models import ThreadType, Message, Mention
 
+# Thiết lập logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# File lưu trữ settings
+SETTINGS_FILE = "settings.json"
+ADMIN_CONFIG_FILE = "admin_config.json"
+AUTOSEND_CONFIG_FILE = "autosend_config.json"
+is_admin = "552782355350996128"  # ID admin c
 # ============== DÒNG IMPORT GÂY LỖI VÒNG TRÒN ĐÃ BỊ XÓA KHỎI ĐÂY ==============
 
 BACKGROUND_PATH = "background/"
@@ -34,6 +60,476 @@ LOG_FILE = 'logs.json'
 MUTED_MESSAGES_FILE = 'muted_messages.json'
 
 autostk_loops = {}
+
+def read_settings(uid: str) -> Dict:
+    """Đọc settings từ file"""
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                all_settings = json.load(f)
+                return all_settings.get(str(uid), {})
+        return {}
+    except Exception as e:
+        logger.error(f"Lỗi khi đọc settings: {e}")
+        return {}
+
+def write_settings(uid: str, settings: Dict) -> None:
+    """Ghi settings vào file"""
+    try:
+        all_settings = {}
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                all_settings = json.load(f)
+        
+        all_settings[str(uid)] = settings
+        
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(all_settings, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Lỗi khi ghi settings: {e}")
+
+def get_allowed_thread_ids(bot) -> List[str]:
+    """Lấy danh sách thread_id được phép"""
+    settings = read_settings(bot.uid)
+    return settings.get('allowed_thread_ids', [])
+
+def is_admin(bot, author_id: str) -> bool:
+    """Kiểm tra user có phải admin không"""
+    settings = read_settings(bot.uid)
+    admin_bot = settings.get("admin_bot", [])
+    return str(author_id) == is_admin or str(author_id) in admin_bot
+
+def handle_bot_admin(bot):
+    """Xử lý admin bot"""
+    try:
+        settings = read_settings(bot.uid)
+        if 'admin_bot' not in settings:
+            settings['admin_bot'] = []
+        if 'allowed_thread_ids' not in settings:
+            settings['allowed_thread_ids'] = []
+        write_settings(bot.uid, settings)
+    except Exception as e:
+        logger.error(f"Lỗi khi xử lý admin bot: {e}")
+
+def handle_event(bot, event_data, event_type):
+    """Xử lý các event từ Zalo"""
+    try:
+        # Xử lý event ở đây
+        pass
+    except Exception as e:
+        logger.error(f"Lỗi khi xử lý event: {e}")
+
+def handle_check_profanity(bot, author_id, thread_id, message_object, thread_type, message):
+    """Kiểm tra và xử lý từ ngữ không phù hợp"""
+    try:
+        settings = read_settings(bot.uid)
+        banned_words = settings.get('banned_words', [])
+        
+        if isinstance(message, Message):
+            message_text = message.text.lower()
+        else:
+            message_text = str(message).lower()
+            
+        for word in banned_words:
+            if word.lower() in message_text:
+                bot.deleteMessage(message_object.msgId, thread_id, thread_type)
+                bot.replyMessage(
+                    Message(text=f"⚠️ Tin nhắn chứa từ ngữ không phù hợp đã bị xóa!"),
+                    message_object, thread_id, thread_type
+                )
+                break
+    except Exception as e:
+        logger.error(f"Lỗi khi kiểm tra profanity: {e}")
+
+def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, message):
+    """Xử lý lệnh bot"""
+    try:
+        if not is_admin(bot, author_id):
+            bot.replyMessage(
+                Message(text="❌ Bạn không có quyền sử dụng lệnh này!"),
+                message_object, thread_id, thread_type
+            )
+            return
+            
+        settings = read_settings(bot.uid)
+        
+        # Xử lý các lệnh bot admin
+        if "add admin" in message.lower():
+            # Logic thêm admin
+            pass
+        elif "remove admin" in message.lower():
+            # Logic xóa admin
+            pass
+        elif "add group" in message.lower():
+            # Logic thêm group
+            pass
+        elif "remove group" in message.lower():
+            # Logic xóa group
+            pass
+            
+    except Exception as e:
+        logger.error(f"Lỗi khi xử lý lệnh bot: {e}")
+
+def initialize_group_info(bot, allowed_thread_ids):
+    """Khởi tạo thông tin group"""
+    try:
+        for thread_id in allowed_thread_ids:
+            try:
+                group_info = bot.fetchGroupInfo(thread_id)
+                bot.group_info_cache[thread_id] = group_info
+            except Exception as e:
+                logger.error(f"Lỗi khi lấy thông tin group {thread_id}: {e}")
+    except Exception as e:
+        logger.error(f"Lỗi khi khởi tạo group info: {e}")
+
+def start_member_check_thread(bot, allowed_thread_ids):
+    """Bắt đầu thread kiểm tra thành viên"""
+    def check_members():
+        while True:
+            try:
+                for thread_id in allowed_thread_ids:
+                    try:
+                        # Logic kiểm tra thành viên
+                        pass
+                    except Exception as e:
+                        logger.error(f"Lỗi khi kiểm tra thành viên {thread_id}: {e}")
+                time.sleep(300)  # Check mỗi 5 phút
+            except Exception as e:
+                logger.error(f"Lỗi trong member check thread: {e}")
+    
+    thread = threading.Thread(target=check_members, daemon=True)
+    thread.start()
+
+# ================ AUTOSEND SYSTEM - FIXED ================
+
+class AutoSendManager:
+    """Quản lý hệ thống AutoSend đã được fix lỗi"""
+    
+    def __init__(self, bot):
+        self.bot = bot
+        self.autosend_threads = {}
+        self.autosend_settings = {}
+        self.is_running = {}
+        self.load_autosend_config()
+        
+    def load_autosend_config(self):
+        """Load cấu hình AutoSend"""
+        try:
+            if os.path.exists(AUTOSEND_CONFIG_FILE):
+                with open(AUTOSEND_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    self.autosend_settings = json.load(f)
+        except Exception as e:
+            logger.error(f"Lỗi khi load config AutoSend: {e}")
+            self.autosend_settings = {}
+    
+    def save_autosend_config(self):
+        """Lưu cấu hình AutoSend"""
+        try:
+            with open(AUTOSEND_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.autosend_settings, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Lỗi khi lưu config AutoSend: {e}")
+    
+    def start_autosend(self, thread_id: str, interval: int, content_type: str, content_data: Any):
+        """Bắt đầu AutoSend cho thread"""
+        try:
+            # Dừng autosend cũ nếu có
+            self.stop_autosend(thread_id)
+            
+            # Tạo cấu hình mới
+            self.autosend_settings[thread_id] = {
+                'interval': interval,
+                'content_type': content_type,
+                'content_data': content_data,
+                'enabled': True,
+                'last_sent': 0
+            }
+            
+            # Lưu cấu hình
+            self.save_autosend_config()
+            
+            # Bắt đầu thread mới
+            self.is_running[thread_id] = True
+            thread = threading.Thread(
+                target=self._autosend_worker,
+                args=(thread_id,),
+                daemon=True
+            )
+            thread.start()
+            self.autosend_threads[thread_id] = thread
+            
+            logger.info(f"✅ Bắt đầu AutoSend cho thread {thread_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Lỗi khi bắt đầu AutoSend: {e}")
+            return False
+    
+    def stop_autosend(self, thread_id: str):
+        """Dừng AutoSend cho thread"""
+        try:
+            self.is_running[thread_id] = False
+            
+            if thread_id in self.autosend_settings:
+                self.autosend_settings[thread_id]['enabled'] = False
+                self.save_autosend_config()
+            
+            if thread_id in self.autosend_threads:
+                del self.autosend_threads[thread_id]
+            
+            logger.info(f"🛑 Dừng AutoSend cho thread {thread_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Lỗi khi dừng AutoSend: {e}")
+            return False
+    
+    def _autosend_worker(self, thread_id: str):
+        """Worker thread cho AutoSend"""
+        while self.is_running.get(thread_id, False):
+            try:
+                if thread_id not in self.autosend_settings:
+                    break
+                
+                config = self.autosend_settings[thread_id]
+                if not config.get('enabled', False):
+                    break
+                
+                current_time = time.time()
+                last_sent = config.get('last_sent', 0)
+                interval = config.get('interval', 300)  # Default 5 phút
+                
+                if current_time - last_sent >= interval:
+                    self._send_autosend_content(thread_id, config)
+                    config['last_sent'] = current_time
+                    self.save_autosend_config()
+                
+                time.sleep(10)  # Check mỗi 10 giây
+                
+            except Exception as e:
+                logger.error(f"Lỗi trong AutoSend worker {thread_id}: {e}")
+                time.sleep(30)  # Đợi 30s trước khi thử lại
+    
+    def _send_autosend_content(self, thread_id: str, config: Dict):
+        """Gửi nội dung AutoSend"""
+        try:
+            content_type = config.get('content_type', 'text')
+            content_data = config.get('content_data', [])
+            
+            if not content_data:
+                return
+            
+            if content_type == 'text':
+                message = random.choice(content_data)
+                self.bot.sendMessage(message, thread_id, ThreadType.GROUP)
+                
+            elif content_type == 'image':
+                image_url = random.choice(content_data)
+                self.bot.sendRemoteImage(image_url, thread_id=thread_id, thread_type=ThreadType.GROUP)
+                
+            elif content_type == 'sticker':
+                sticker = random.choice(content_data)
+                self.bot.sendSticker(
+                    sticker['stickerType'], 
+                    sticker['stickerId'], 
+                    sticker.get('cateId', ''), 
+                    thread_id, 
+                    ThreadType.GROUP
+                )
+                
+            elif content_type == 'mixed':
+                content = random.choice(content_data)
+                if content['type'] == 'text':
+                    self.bot.sendMessage(content['data'], thread_id, ThreadType.GROUP)
+                elif content['type'] == 'image':
+                    self.bot.sendRemoteImage(content['data'], thread_id=thread_id, thread_type=ThreadType.GROUP)
+                    
+            logger.info(f"📤 Đã gửi AutoSend tới {thread_id}")
+            
+        except Exception as e:
+            logger.error(f"Lỗi khi gửi AutoSend content: {e}")
+    
+    def get_autosend_status(self, thread_id: str) -> Dict:
+        """Lấy trạng thái AutoSend"""
+        if thread_id in self.autosend_settings:
+            config = self.autosend_settings[thread_id].copy()
+            config['is_running'] = self.is_running.get(thread_id, False)
+            return config
+        return {'enabled': False, 'is_running': False}
+
+# Global AutoSend Manager
+autosend_managers = {}
+
+def get_autosend_manager(bot) -> AutoSendManager:
+    """Lấy AutoSend Manager cho bot"""
+    if bot.uid not in autosend_managers:
+        autosend_managers[bot.uid] = AutoSendManager(bot)
+    return autosend_managers[bot.uid]
+
+def start_autosend_thread(bot):
+    """Khởi tạo AutoSend thread cho bot"""
+    try:
+        manager = get_autosend_manager(bot)
+        
+        # Khởi động lại các AutoSend đã lưu
+        for thread_id, config in manager.autosend_settings.items():
+            if config.get('enabled', False):
+                manager.start_autosend(
+                    thread_id,
+                    config.get('interval', 300),
+                    config.get('content_type', 'text'),
+                    config.get('content_data', [])
+                )
+        
+        logger.info(f"✅ Khởi tạo AutoSend Manager cho bot {bot.uid}")
+        
+    except Exception as e:
+        logger.error(f"Lỗi khi khởi tạo AutoSend thread: {e}")
+
+def handle_autosend_command(bot, message_object, author_id, thread_id, thread_type, message):
+    """Xử lý lệnh AutoSend"""
+    try:
+        if not is_admin(bot, author_id):
+            bot.replyMessage(
+                Message(text="❌ Bạn không có quyền sử dụng lệnh này!"),
+                message_object, thread_id, thread_type
+            )
+            return
+        
+        manager = get_autosend_manager(bot)
+        parts = message.strip().split()
+        
+        if len(parts) < 2:
+            # Hiển thị menu AutoSend
+            show_autosend_menu(bot, message_object, thread_id, thread_type, manager)
+            return
+        
+        command = parts[1].lower()
+        
+        if command == "on":
+            # Bật AutoSend
+            if len(parts) < 3:
+                bot.replyMessage(
+                    Message(text="❌ Cú pháp: /autosend on [interval_minutes]"),
+                    message_object, thread_id, thread_type
+                )
+                return
+            
+            try:
+                interval_minutes = int(parts[2])
+                interval_seconds = interval_minutes * 60
+                
+                # Default content - có thể thay đổi
+                default_content = [
+                    "🤖 AutoSend đang hoạt động!",
+                    "💬 Tin nhắn tự động từ bot",
+                    "🔄 Hệ thống AutoSend"
+                ]
+                
+                success = manager.start_autosend(thread_id, interval_seconds, 'text', default_content)
+                
+                if success:
+                    bot.replyMessage(
+                        Message(text=f"✅ Đã bật AutoSend với chu kỳ {interval_minutes} phút!"),
+                        message_object, thread_id, thread_type
+                    )
+                else:
+                    bot.replyMessage(
+                        Message(text="❌ Lỗi khi bật AutoSend!"),
+                        message_object, thread_id, thread_type
+                    )
+                    
+            except ValueError:
+                bot.replyMessage(
+                    Message(text="❌ Chu kỳ phải là số nguyên (phút)!"),
+                    message_object, thread_id, thread_type
+                )
+        
+        elif command == "off":
+            # Tắt AutoSend
+            success = manager.stop_autosend(thread_id)
+            
+            if success:
+                bot.replyMessage(
+                    Message(text="🛑 Đã tắt AutoSend!"),
+                    message_object, thread_id, thread_type
+                )
+            else:
+                bot.replyMessage(
+                    Message(text="❌ Lỗi khi tắt AutoSend!"),
+                    message_object, thread_id, thread_type
+                )
+        
+        elif command == "status":
+            # Kiểm tra trạng thái
+            status = manager.get_autosend_status(thread_id)
+            
+            if status['enabled']:
+                interval_minutes = status.get('interval', 0) // 60
+                is_running = status.get('is_running', False)
+                last_sent = status.get('last_sent', 0)
+                
+                if last_sent > 0:
+                    last_sent_str = datetime.fromtimestamp(last_sent).strftime("%H:%M:%S %d/%m/%Y")
+                else:
+                    last_sent_str = "Chưa gửi"
+                
+                status_text = f"""📊 Trạng thái AutoSend:
+✅ Trạng thái: {'Đang chạy' if is_running else 'Đã dừng'}
+⏰ Chu kỳ: {interval_minutes} phút
+📤 Lần gửi cuối: {last_sent_str}
+📋 Loại nội dung: {status.get('content_type', 'text')}
+📝 Số nội dung: {len(status.get('content_data', []))}"""
+            else:
+                status_text = "❌ AutoSend chưa được kích hoạt!"
+                
+            bot.replyMessage(
+                Message(text=status_text),
+                message_object, thread_id, thread_type
+            )
+            
+    except Exception as e:
+        logger.error(f"Lỗi khi xử lý lệnh AutoSend: {e}")
+        bot.replyMessage(
+            Message(text="❌ Đã xảy ra lỗi khi xử lý lệnh!"),
+            message_object, thread_id, thread_type
+        )
+
+def show_autosend_menu(bot, message_object, thread_id, thread_type, manager):
+    """Hiển thị menu AutoSend"""
+    try:
+        status = manager.get_autosend_status(thread_id)
+        
+        menu_text = f"""🤖 MENU AUTOSEND
+━━━━━━━━━━━━━━━━━━━━━━━━
+📊 Trạng thái: {'✅ Đang chạy' if status.get('is_running', False) else '❌ Đã tắt'}
+
+🔧 Lệnh có sẵn:
+• {bot.prefix}autosend on [phút] - Bật AutoSend
+• {bot.prefix}autosend off - Tắt AutoSend  
+• {bot.prefix}autosend status - Kiểm tra trạng thái
+
+📝 Ví dụ:
+• {bot.prefix}autosend on 30 - Gửi mỗi 30 phút
+• {bot.prefix}autosend off - Tắt AutoSend
+
+⚠️ Chỉ admin mới có thể sử dụng!"""
+
+        bot.replyMessage(
+            Message(text=menu_text),
+            message_object, thread_id, thread_type
+        )
+        
+    except Exception as e:
+        logger.error(f"Lỗi khi hiển thị menu AutoSend: {e}")
+
+# Export các hàm cần thiết
+__all__ = [
+    'read_settings', 'write_settings', 'get_allowed_thread_ids',
+    'is_admin', 'handle_bot_admin', 'handle_event', 'handle_check_profanity',
+    'handle_bot_command', 'initialize_group_info', 'start_member_check_thread',
+    'start_autosend_thread', 'handle_autosend_command', 'get_autosend_manager'
+]
 
 def sticker_loop(bot, thread_id, thread_type):
     stop_event = autostk_loops.get(thread_id)

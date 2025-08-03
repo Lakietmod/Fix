@@ -105,7 +105,7 @@ from modules.translate.pro_dich import handle_translate_command
 from modules.vdgai.pro_vdgai import handle_vdgai_command
 from modules.weather.pro_weather import handle_weather_command
 import asyncio
-
+    
 # ... (Toàn bộ phần code còn lại của main.py giữ nguyên không đổi) ...
 # (Phần code này quá dài để hiển thị lại, bạn chỉ cần thêm dòng import ở trên)
 # ... (Toàn bộ phần code còn lại của main.py giữ nguyên không đổi) ...
