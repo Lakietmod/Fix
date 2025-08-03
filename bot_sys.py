@@ -2296,7 +2296,131 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
 
                 else:
                     bot.sendReaction(message_object, "❌", thread_id, thread_type)
-            
+    
+    except Exception:
+        pass
+    
+def handle_bot_status(bot, thread_id, author_id):
+    """Hiển thị trạng thái bot trong nhóm"""
+    try:
+        settings = read_settings(bot.uid)
+        group_info = bot.fetchGroupInfo(thread_id)
+        group_name = group_info.gridInfoMap.get(thread_id, {}).get('name', 'N/A')
+        
+        # Kiểm tra các trạng thái
+        allowed_thread_ids = settings.get('allowed_thread_ids', [])
+        bot_enabled = thread_id in allowed_thread_ids
+        
+        # Autosend status
+        autosend_status = settings.get("autosend", {}).get(thread_id, False)
+        
+        # Anti features status
+        spam_enabled = settings.get('spam_enabled', {}).get(thread_id, False)
+        anti_poll = settings.get('anti_poll', True)
+        video_enabled = settings.get('video_enabled', True)
+        card_enabled = settings.get('card_enabled', True)
+        file_enabled = settings.get('file_enabled', True)
+        image_enabled = settings.get('image_enabled', True)
+        voice_enabled = settings.get('voice_enabled', True)
+        sticker_enabled = settings.get('sticker_enabled', True)
+        gif_enabled = settings.get('gif_enabled', True)
+        doodle_enabled = settings.get('doodle_enabled', True)
+        allow_link = settings.get('allow_link', {}).get(thread_id, False)
+        welcome_enabled = settings.get('welcome', {}).get(thread_id, False)
+        
+        status_icon = lambda enabled: "✅" if enabled else "⭕️"
+        
+        response = f"🤖 Trạng thái BOT trong nhóm:\n"
+        response += f"📌 Nhóm: {group_name}\n"
+        response += f"🔧 Bot: {'🟢 Hoạt động' if bot_enabled else '🔴 Tắt'}\n"
+        response += f"📨 Autosend: {'🟢 Bật' if autosend_status else '🔴 Tắt'}\n"
+        response += f"🎉 Welcome: {'🟢 Bật' if welcome_enabled else '🔴 Tắt'}\n\n"
+        response += f"🛡️ Tính năng bảo vệ:\n"
+        response += f"{status_icon(spam_enabled)} Anti-Spam 💢\n"
+        response += f"{status_icon(not anti_poll)} Anti-Poll 👍\n"
+        response += f"{status_icon(not video_enabled)} Anti-Video ▶️\n"
+        response += f"{status_icon(not card_enabled)} Anti-Card 🛡️\n"
+        response += f"{status_icon(not file_enabled)} Anti-File 🗂️\n"
+        response += f"{status_icon(not image_enabled)} Anti-Photo 🏖\n"
+        response += f"{status_icon(not voice_enabled)} Anti-Voice 🔊\n"
+        response += f"{status_icon(not sticker_enabled)} Anti-Sticker 😊\n"
+        response += f"{status_icon(not gif_enabled)} Anti-Gif 🖼️\n"
+        response += f"{status_icon(not doodle_enabled)} Anti-Draw ✏️\n"
+        response += f"{status_icon(allow_link)} Anti-Link 🔗\n"
+        
+        return response
+        
+    except Exception as e:
+        return f"❌ Lỗi khi lấy trạng thái bot: {str(e)}"
+
+def handle_bot_list_groups(bot, author_id):
+    """Liệt kê tất cả nhóm bot đang hoạt động"""
+    if not is_admin(bot, author_id):
+        return "❌ Bạn không có quyền sử dụng lệnh này!"
+    
+    try:
+        settings = read_settings(bot.uid)
+        allowed_thread_ids = settings.get('allowed_thread_ids', [])
+        
+        if not allowed_thread_ids:
+            return "📌 Bot chưa hoạt động trong nhóm nào"
+        
+        response = f"🤖 Danh sách nhóm bot đang hoạt động ({len(allowed_thread_ids)} nhóm):\n\n"
+        
+        for i, thread_id in enumerate(allowed_thread_ids, 1):
+            try:
+                group_info = bot.fetchGroupInfo(thread_id)
+                group_name = group_info.gridInfoMap.get(thread_id, {}).get('name', f'Group_{thread_id}')
+                total_members = group_info.gridInfoMap.get(thread_id, {}).get('totalMember', 0)
+                
+                # Kiểm tra autosend
+                autosend_status = settings.get("autosend", {}).get(thread_id, False)
+                autosend_icon = "📨" if autosend_status else "📪"
+                
+                response += f"{i}. {group_name}\n"
+                response += f"   🆔 ID: {thread_id}\n"
+                response += f"   👥 Thành viên: {total_members}\n"
+                response += f"   {autosend_icon} Autosend: {'Bật' if autosend_status else 'Tắt'}\n\n"
+                
+            except Exception as e:
+                response += f"{i}. Unknown Group\n"
+                response += f"   🆔 ID: {thread_id}\n"
+                response += f"   ❌ Lỗi: {str(e)}\n\n"
+        
+        return response
+        
+    except Exception as e:
+        return f"❌ Lỗi khi lấy danh sách nhóm: {str(e)}"
+
+# Cập nhật hàm handle_bot_command để thêm các lệnh mới
+def handle_bot_command_extended(bot, message_object, author_id, thread_id, thread_type, command):
+    """Phần mở rộng cho handle_bot_command với các lệnh mới"""
+    
+    parts = command.split()
+    if len(parts) < 2:
+        return None  # Để hàm gốc xử lý
+    
+    action = parts[1].lower()
+    
+    if action == 'status':
+        if thread_type != ThreadType.GROUP:
+            response = "➜ Lệnh này chỉ khả thi trong nhóm 🤧"
+        else:
+            response = handle_bot_status(bot, thread_id, author_id)
+        
+        bot.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
+        return True
+        
+    elif action == 'list':
+        response = handle_bot_list_groups(bot, author_id)
+        bot.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
+        return True
+        
+    return None  # Để hàm gốc xử lý các lệnh khác
+    
+    
+    
+    
             if response:
                 if len(parts) == 1:
                     os.makedirs(CACHE_PATH, exist_ok=True)
@@ -2418,6 +2542,10 @@ def interpolate_colors(colors: List[Tuple[int, int, int]], text_length: int, cha
         gradient.append(colors[-1])
 
     return gradient[:text_length]
+
+#at
+
+
 
 def is_emoji(character: str) -> bool:
     return character in emoji.EMOJI_DATA
