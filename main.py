@@ -28,7 +28,7 @@ from PIL import Image, ImageDraw, ImageOps, ImageFont, ImageFilter, ImageEnhance
 from bs4 import BeautifulSoup
 from colorama import Style, init
 import pyfiglet
-from modules.func_autosend.pro_autosend import start_autosend_handle, start_autosend_thread
+from modules.func_autosend.pro_autosend import start_autosend_thread
 from zlapi import ZaloAPI
 from zlapi.models import Message, ThreadType, Mention
 from core.bot_sys import *
@@ -1784,7 +1784,7 @@ class bot(ZaloAPI):
         elif message_lower.startswith(f"{prefix}stkxp"):
             handle_stkxp_command(message_text, message_object, thread_id, thread_type, author_id, self)
         elif message_lower.startswith(f"{prefix}autosend"):
-            start_autosend_handle(self, thread_type, message_object, message, thread_id, prefix, author_id)
+            start_autosend_handle(bot, thread_type, thread_id, message, prefix, author_id, message_object)
         elif message_lower.startswith(f"{prefix}group"):
             handle_group_command(message_text, message_object, thread_id, thread_type, author_id, self)
         elif message_lower.startswith(f"{prefix}qrbank"):
@@ -1891,8 +1891,6 @@ class bot(ZaloAPI):
             handle_join1_command(message_text, message_object, thread_id, thread_type, author_id, self)
         elif message_lower.startswith(f"{prefix}kickall"):
             kick_member_group(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}autosend"):
-            start_autosend_handle(self, thread_type, message_object, message_text, thread_id, prefix, author_id)
         elif message_lower.startswith(f"{prefix}meme"):
             meme(self, message_object, author_id, thread_id, thread_type, message_text)
         elif message_lower.startswith(f"{prefix}src"):
