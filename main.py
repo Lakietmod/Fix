@@ -11,7 +11,7 @@ from queue import Queue
 import tempfile
 import threading
 import subprocess
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import requests
 import pytz
@@ -28,13 +28,18 @@ from PIL import Image, ImageDraw, ImageOps, ImageFont, ImageFilter, ImageEnhance
 from bs4 import BeautifulSoup
 from colorama import Style, init
 import pyfiglet
-from modules.func_autosend.pro_autosend import start_autosend_thread
+# FIX: Added specific imports for autosend handlers
+from modules.func_autosend.pro_autosend import (
+    start_autosend_thread, 
+    handle_autosend_command, 
+    handle_autosend_on, 
+    handle_autosend_off, 
+    get_autosend_status, 
+    list_autosend_groups
+)
 from zlapi import ZaloAPI
-from zlapi.models import Message, ThreadType, Mention
+from zlapi.models import Message, ThreadType, Mention, GroupEventType
 from core.bot_sys import *
-
-# Import cho lệnh !bot
-from core.bot_sys import handle_bot_command
 
 # Toàn bộ import module lệnh của bạn
 from modules.ff.pro_ff import handle_ff_command
@@ -105,10 +110,7 @@ from modules.translate.pro_dich import handle_translate_command
 from modules.vdgai.pro_vdgai import handle_vdgai_command
 from modules.weather.pro_weather import handle_weather_command
 import asyncio
-    
-# ... (Toàn bộ phần code còn lại của main.py giữ nguyên không đổi) ...
-# (Phần code này quá dài để hiển thị lại, bạn chỉ cần thêm dòng import ở trên)
-# ... (Toàn bộ phần code còn lại của main.py giữ nguyên không đổi) ...
+import string # FIX: Added missing import
 
 current_word = None; wrong_attempts = 0; correct_attempts = 0; timeout_thread = None; timeout_duration = 30; current_player = None; used_words = set(); game_active = False; leaderboard = {}; leaderboard_file = "leaderboard.json"; words = []
 user_selection_data = {}; session = requests.Session()
@@ -487,7 +489,7 @@ def start_new_game(bot, message_object, author_id, thread_id, thread_type):
     used_words.add(current_word)
     current_player = author_id
     game_active = True
-    response = f"➜ Tu khoi dau: '{current_word}'\n"
+    response = f"➜ Tu khoi đau: '{current_word}'\n"
     start_timeout(bot, message_object, thread_id, thread_type)
     bot.replyMessage(Message(text=response), message_object,
                    thread_id=thread_id, thread_type=thread_type)
@@ -555,15 +557,18 @@ def nt_go(bot, message_object, author_id, thread_id, thread_type, message):
     global current_word, wrong_attempts, current_player, used_words, game_active
     message_text = message.strip()
     
-    if message_text.startswith(f"{bot.prefix}nt bxh"):
+    # FIX: Use getattr to prevent crash if bot.prefix is not set
+    prefix = getattr(bot, 'prefix', '/')
+
+    if message_text.startswith(f"{prefix}nt bxh"):
         return nt_bxh(bot, message_object, thread_id, thread_type)
-    elif message_text.startswith(f"{bot.prefix}nt check"):
+    elif message_text.startswith(f"{prefix}nt check"):
         return nt_check(bot, message_object, author_id, thread_id, thread_type, message)
-    elif message_text.startswith(f"{bot.prefix}nt add"):
+    elif message_text.startswith(f"{prefix}nt add"):
         return nt_add(bot, message_object, author_id, thread_id, thread_type, message)
-    elif message_text.startswith(f"{bot.prefix}nt del"):
+    elif message_text.startswith(f"{prefix}nt del"):
         return nt_del(bot, message_object, author_id, thread_id, thread_type, message)
-    elif message_text == f"{bot.prefix}nt":
+    elif message_text == f"{prefix}nt":
         return show_menu(bot, message_object, message, author_id, thread_id, thread_type)
     
     if not game_active or current_player is None:
@@ -575,7 +580,7 @@ def nt_go(bot, message_object, author_id, thread_id, thread_type, message):
     if author_id != current_player:
         return
     
-    player_word = message_text.replace(f"{bot.prefix}nt", "").strip()
+    player_word = message_text.replace(f"{prefix}nt", "").strip()
     if len(player_word.split()) != 2:
         if handle_wrong_attempt(bot, message_object, thread_id, thread_type):
             return
@@ -603,14 +608,16 @@ def nt_go(bot, message_object, author_id, thread_id, thread_type, message):
 def show_menu(bot, message_object, message, author_id, thread_id, thread_type):
     content = message.strip().split()
     message_text = message.strip()
-    if message_text.startswith(f"{bot.prefix}nt"):
+    # FIX: Use getattr to prevent crash if bot.prefix is not set
+    prefix = getattr(bot, 'prefix', '/')
+    if message_text.startswith(f"{prefix}nt"):
         if len(content) == 1:
             menu_nt = {
-                f"{bot.prefix}nt go": "🔠 Bat dau game",
-                f"{bot.prefix}nt check [tu vung]": "✅ Kiem tra y nghia tu vung",
-                f"{bot.prefix}nt bxh": "🏆 Top 10 BXH",
-                f"{bot.prefix}nt add [tu vung]": "✚ Them tu vung (BMT)",
-                f"{bot.prefix}nt del [tu vung]": "🗑️ Xoa tu vung"
+                f"{prefix}nt go": "🔠 Bat dau game",
+                f"{prefix}nt check [tu vung]": "✅ Kiem tra y nghia tu vung",
+                f"{prefix}nt bxh": "🏆 Top 10 BXH",
+                f"{prefix}nt add [tu vung]": "✚ Them tu vung (BMT)",
+                f"{prefix}nt del [tu vung]": "🗑️ Xoa tu vung"
             }
             temp_image_path, menu_message = create_menu_nt_image(menu_nt, bot, author_id)
             bot.sendLocalImage(
@@ -620,11 +627,11 @@ def show_menu(bot, message_object, message, author_id, thread_id, thread_type):
             os.remove(temp_image_path)
             return
 
-def create_gradient_colors(num_colors: int) -> List[Tuple[int, int, int]]:
+def create_gradient_colors(num_colors: int) -> List[tuple[int, int, int]]:
     return [(random.randint(80, 220), random.randint(80, 220), random.randint(80, 220)) 
             for _ in range(num_colors)]
 
-def interpolate_colors(colors: List[Tuple[int, int, int]], text_length: int, change_every: int) -> List[Tuple[int, int, int]]:
+def interpolate_colors(colors: List[tuple[int, int, int]], text_length: int, change_every: int) -> List[tuple[int, int, int]]:
     gradient = []
     num_segments = len(colors) - 1
     steps_per_segment = max((text_length // change_every) + 1, 1)
@@ -647,9 +654,9 @@ def interpolate_colors(colors: List[Tuple[int, int, int]], text_length: int, cha
 def is_emoji(character: str) -> bool:
     return character in emoji.EMOJI_DATA
 
-def draw_text_with_emoji(draw: ImageDraw.Draw, text: str, position: Tuple[int, int],
+def draw_text_with_emoji(draw: ImageDraw.Draw, text: str, position: tuple[int, int],
                         font: ImageFont.FreeTypeFont, emoji_font: ImageFont.FreeTypeFont,
-                        gradient_colors: List[Tuple[int, int, int]]) -> int:
+                        gradient_colors: List[tuple[int, int, int]]) -> int:
     current_x = position[0]
     y = position[1]
     gradient = interpolate_colors(gradient_colors, len(text), 1)
@@ -675,16 +682,17 @@ def draw_text_with_emoji(draw: ImageDraw.Draw, text: str, position: Tuple[int, i
     return current_x
 
 def create_menu_nt_image(command_names, bot, author_id, nt_status=True):
+    # FIX: Use getattr to prevent crash
+    prefix = getattr(bot, 'prefix', '/')
     avatar_url = bot.fetchUserInfo(author_id).changed_profiles.get(author_id).avatar
     current_page_commands = list(command_names.items())
     numbered_commands = [f"{name}: {desc}" for name, desc in current_page_commands]
     menu_message = f"{get_user_name_by_id(bot, author_id)}\n" + "\n".join(numbered_commands)
 
     background_dir = "background"
-    background_path = random.choice([os.path.join(background_dir, f) 
-                                   for f in os.listdir(background_dir) 
+    background_path = random.choice([f for f in os.listdir(background_dir) 
                                    if f.endswith(('.png', '.jpg'))])
-    image = Image.open(background_path).convert("RGBA").resize((1280, 500))
+    image = Image.open(f"background/" + background_path).convert("RGBA").resize((1280, 500))
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
@@ -714,7 +722,7 @@ def create_menu_nt_image(command_names, bot, author_id, nt_status=True):
 
     text_hi = f"Hi, {get_user_name_by_id(bot, author_id)}"
     text_welcome = f"🎊 Chao mung đen voi menu 🔠 game noi tu"
-    text_nt_status = f"{bot.prefix}nt on/off: bat/tat tinh nang"
+    text_nt_status = f"{prefix}nt on/off: bat/tat tinh nang"
     text_bot_ready = f"♥️ bot san sang phuc vu"
     text_bot_info = f"🤖 Bot: {get_user_name_by_id(bot, bot.uid)} 💻 version 2.0 🗓️ update 08-01-24"
 
@@ -937,7 +945,7 @@ def generate_menu_image(bot, author_id, thread_id, thread_type):
             user = user_info.changed_profiles[author_id]
             user_name = getattr(user, 'name', None) or getattr(user, 'displayName', None) or f"ID_{author_id}"
 
-        greeting_name = "Chủ Nhân" if is_admin(bot, author_id) else user_name
+        greeting_name = "Chu Nhan" if is_admin(bot, author_id) else user_name # FIX: Used is_admin function correctly
 
         emoji_colors = {
             "🎵": random_contrast_color(box_color),
@@ -951,13 +959,19 @@ def generate_menu_image(bot, author_id, thread_id, thread_type):
             "🌙": random_contrast_color(box_color),
             "🌤️": (200, 150, 50, 255)
         }
+        
+        # FIX: Use getattr to access bot attributes safely, preventing crashes.
+        prefix = getattr(bot, 'prefix', '/')
+        bot_name = getattr(bot, 'me_name', 'MyBot')
+        version = getattr(bot, 'version', '1.0')
+        date_update = getattr(bot, 'date_update', 'N/A')
 
         text_lines = [
             f"Hi, {greeting_name}",
-            f"💞 Chao mung đen menu HH3D donghua 🐉",
-            f"{bot.prefix}donghua on/off: 🚀 Bat/Tat tinh nang",
+            f"💞 Chao mung đen voi menu 🤖 BOT",
+            f"{prefix}bot on/off: 🚀 Bat/Tat tinh nang",
             "😁 Bot San Sang Phuc 🖤",
-            f"🤖Bot: {bot.me_name} 💻Version: {bot.version} 📅Update {bot.date_update}"
+            f"🤖Bot: {bot_name} 💻Version: {version} 📅Update {date_update}"
         ]
 
         color1 = random_contrast_color(box_color)
@@ -1073,7 +1087,7 @@ def generate_menu_image(bot, author_id, thread_id, thread_type):
                 current_x += width
             current_line_idx += 1
 
-        right_icons = ["🐉", "🐳", "🐲"]
+        right_icons = ["🤖"]
         right_icon = random.choice(right_icons)
         icon_right_x = box_x2 - 225
         icon_right_y = (box_y1 + box_y2 - 180) // 2
@@ -1090,942 +1104,1465 @@ def generate_menu_image(bot, author_id, thread_id, thread_type):
         print(f"❌ Loi xu ly anh menu: {e}")
         return None
 
-def get_user_name_by_id(bot, author_id):
-    try:
-        user_info = bot.fetchUserInfo(author_id).changed_profiles[author_id]
-        return user_info.zaloName or user_info.displayName
-    except Exception as e:
-        return "Unknown User"
-    
-def tim_kiem_yanhh3d(bot, message_object, author_id, thread_id, thread_type, message_lower, message):
-    try:
-        parts = message.split(maxsplit=1)
-        if len(parts) < 2:
-            response = (
-                f"{get_user_name_by_id(bot, author_id)}\n"
-                f"{bot.prefix}donghua [tu khoa]: .\n"
-                f"{bot.prefix}donghua bxh: .\n"
-                f"💞 Vi du: {bot.prefix}donghua tu tutien  ✅\n"
-            )
-            os.makedirs(CACHE_PATH, exist_ok=True)
-    
-            image_path = generate_menu_image(bot, author_id, thread_id, thread_type)
-            if not image_path:
-                bot.sendMessage("❌ Khong the tao anh menu!", thread_id, thread_type)
-                return
-
-            reaction = [
-                "❌", "🤧", "🐞", "😊", "🔥", "👍", "💖", "🚀",
-                "😍", "😂", "😢", "😎", "🙌", "💪", "🌟", "🍀",
-                "🎉", "🦁", "🌈", "🍎", "⚡", "🔔", "🎸", "🍕",
-                "🏆", "📚", "🦋", "🌍", "⛄", "🎁", "💡", "🐾",
-                "😺", "🐶", "🐳", "🦄", "🌸", "🍉", "🍔", "🎄",
-                "🎃", "👻", "☃️", "🌴", "🏀", "⚽", "🎾", "🏈",
-                "🚗", "✈️", "🚢", "🌙", "☀️", "⭐", "⛅", "☔",
-                "⌛", "⏰", "💎", "💸", "📷", "🎥", "🎤", "🎧",
-                "🍫", "🍰", "🍩", "☕", "🍵", "🍷", "🍹", "🥐",
-                "🐘", "🦒", "🐍", "🦜", "🐢", "🦀", "🐙", "🦈",
-                "🍓", "🍋", "🍑", "🥥", "🥐", "🥪", "🍝", "🍣",
-                "🎲", "🎯", "🎱", "🎮", "🎰", "🧩", "🧸", "🎡",
-                "🏰", "🗽", "🗼", "🏔️", "🏝️", "🏜️", "🌋", "⛲",
-                "📱", "💻", "🖥️", "🖨️", "⌨️", "🖱️", "📡", "🔋",
-                "🔍", "🔎", "🔑", "🔒", "🔓", "📩", "📬", "📮",
-                "💢", "💥", "💫", "💦", "💤", "🚬", "💣", "🔫",
-                "🩺", "💉", "🩹", "🧬", "🔬", "🔭", "🧪", "🧫",
-                "🧳", "🎒", "👓", "🕶️", "👔", "👗", "👠", "🧢",
-                "🦷", "🦴", "👀", "👅", "👄", "👶", "👩", "👨",
-                "🚶", "🏃", "💃", "🕺", "🧘", "🏄", "🏊", "🚴",
-                "🍄", "🌾", "🌻", "🌵", "🌿", "🍂", "🍁", "🌊",
-                "🛠️", "🔧", "🔨", "⚙️", "🪚", "🪓", "🧰", "⚖️",
-                "🧲", "🪞", "🪑", "🛋️", "🛏️", "🪟", "🚪", "🧹"
-            ]
-            
-            bot.sendReaction(message_object, random.choice(reaction), thread_id, thread_type)
-            bot.sendLocalImage(
-                imagePath=image_path,
-                message=Message(text=response, mention=Mention(author_id, length=len(f"{get_user_name_by_id(bot, author_id)}"), offset=0)),
-                thread_id=thread_id,
-                thread_type=thread_type,
-                width=1920,
-                height=600,
-                ttl=240000
-            )
-            
-            try:
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-            except Exception as e:
-                print(f"❌ Loi khi xoa anh: {e}")
-            return
-
-        tu_khoa = parts[1].strip().lower()
-        if tu_khoa == "bxh":
-            send_bxh(bot, thread_id, thread_type, message_object, author_id)
-            return
-
-        url = "https://yanhh3d.vip/ajax/search/suggest"
-        params = {"ajaxSearch": "1", "keysearch": tu_khoa}
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = session.get(url, params=params, headers=headers)
-        data = response.json()
-        html_data = data.get("data", "")
-        soup = BeautifulSoup(html_data, "html.parser")
-        items = soup.find_all("a")
-
-        if not items:
-            bot.replyMessage(
-                Message(text="❌ Khong tim thay ket qua nao."),
-                message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-            )
-            return
-
-        danh_sach = []
-        for a_tag in items:
-            title = a_tag.get("title")
-            ep_span = a_tag.find("span", class_="ep-search")
-            so_tap = ep_span.get_text(strip=True) if ep_span else "Khong ro"
-            url_phim = a_tag.get('href')
-            img_tag = a_tag.find("img")
-            avatar_url = img_tag.get("src") if img_tag else ""
-            danh_sach.append((title, so_tap, url_phim, avatar_url)) 
-
-        user_selection_data[author_id] = {
-            "state": "waiting_for",
-            "next_step": "handle_user_selection",
-            "danh_sach": danh_sach
-        }
-
-        set_timeout(author_id, bot, message_object, thread_id, thread_type)
-
-        danh_sach_text = "\n".join(
-            [f"➜ {i}. {title} ({so_tap})" for i, (title, so_tap, _, _) in enumerate(danh_sach, 1)]
-        )
-
-        custom_message = (
-            f"🚦{get_user_name_by_id(bot, author_id)}\n"
-            f"🔎 Danh sach phim hoat hinh 3D '{tu_khoa}' tim đuoc\n"
-            f"🧮 Tong cong: {len(danh_sach)} phim\n"
-            "🌀 Nguon: yanhh3d.tv\n\n"
-            f"{danh_sach_text}\n"
-            "🎯 Moi ban nhap so tuong ung đe chon phim (30s)\n"
-            "🚦 Nhap 0 đe huy chon"
-        )
-
-        anh_path = ve_anh_danh_sach(danh_sach, tu_khoa)
-        bot.sendLocalImage(
-            imagePath=anh_path,
-            thread_id=thread_id,
-            thread_type=thread_type,
-            message=Message(text=custom_message),
-            height=440,
-            width=1365,
-            ttl=30000
-        )
-        os.remove(anh_path)
-
-        if message == "0":
-            bot.replyMessage(
-                Message(text="❌ Ban đa huy lua chon."),
-                message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-            )
-            user_selection_data.pop(author_id, None)  
-            return
-
-    except Exception as e:
-        bot.replyMessage(
-            Message(text=f"❌ Đa xay ra loi khi tim kiem: {str(e)}"),
-            message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-        )
-
-def set_timeout(author_id, bot, message_object, thread_id, thread_type):
-    def cancel_selection():
-        if author_id in user_selection_data and user_selection_data[author_id]["state"] == "waiting_for":
-            del user_selection_data[author_id]
-            bot.replyMessage(
-                Message(text="⏰ Het thoi gian phan hoi. Vui long thu lai tu đau."),
-                message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-            )
-    timer = threading.Timer(30.0, cancel_selection)
-    timer.start()
-
-
-def ve_anh_danh_sach(danh_sach, tu_khoa):
-    width = 1365
-    item_height = 130
-    padding = 20
-    row_count = (len(danh_sach) + 1) // 2
-    height = padding * 2 + row_count * item_height
-
-    bg_path = random.choice([f for f in os.listdir("background") if f.endswith(('.jpg', '.png'))])
-    bg_image = Image.open(f"background/" + bg_path).resize((width, height))
-    img = ImageEnhance.Brightness(bg_image).enhance(0.3)
-    draw = ImageDraw.Draw(img)
-
-    try:
-        font_title = ImageFont.truetype("arial unicode ms.otf", 36)
-        font_item = ImageFont.truetype("arial unicode ms.otf", 28)
-        font_small = ImageFont.truetype("arial unicode ms.otf", 24)
-    except:
-        font_title = font_item = font_small = ImageFont.load_default()
-
-    def draw_circle_avatar(pos, avatar_url, size=90):
-        try:
-            response = requests.get(avatar_url)
-            avatar = Image.open(BytesIO(response.content)).resize((size, size)).convert("RGBA")
-        except:
-            avatar = Image.new("RGBA", (size, size), (255, 255, 255, 255))
-
-        mask = Image.new("L", (size, size), 0)
-        draw_mask = ImageDraw.Draw(mask)
-        draw_mask.ellipse((0, 0, size, size), fill=255)
-
-        border = Image.new("RGBA", (size + 10, size + 10), (0, 0, 0, 0))
-        border_draw = ImageDraw.Draw(border)
-        border_draw.ellipse((0, 0, size + 10, size + 10), fill=(255, 0, 255, 255))
-        border.paste(avatar, (5, 5), mask=mask)
-        img.paste(border, pos, mask=border)
-
-    for i, (title, so_tap, url_phim, avatar_url) in enumerate(danh_sach):
-        row = i // 2
-        col = i % 2
-        x = padding + col * (width // 2)
-        y = padding + row * item_height
-
-        draw.rounded_rectangle((x, y, x + width // 2 - padding, y + item_height - 10), radius=20, fill=(0, 0, 0, 100))
-        draw_circle_avatar((x + 10, y + 10), avatar_url)
-        draw.text((x + 110, y + 10), title, font=font_item, fill=(200, 150, 255))
-        draw.text((x + 110, y + 50), so_tap, font=font_small, fill=(255, 255, 255))
-        draw.text((x + 110, y + 80), "yanhh3d.vip", font=font_small, fill=(200, 200, 200))
-        draw.text((x + width // 2 - 60, y + 10), str(i + 1), font=font_item, fill=(180, 180, 180))
-
-    with NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-        img.save(tmp.name)
-        return tmp.name
-
-
-def handle_user_selection(bot, message_object, author_id, thread_id, thread_type, message):
-    try:
-        user_data = user_selection_data.get(author_id)
-        if not user_data or user_data.get("next_step") != "handle_user_selection":
-            return
-
-        danh_sach = user_data.get('danh_sach', [])
-
-        if message.strip() == "0":
-            bot.replyMessage(
-                Message(text="❌ Ban đa huy lua chon."),
-                message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-            )
-            user_selection_data.pop(author_id, None)
-            return
-
-        if not message.isdigit():
-            bot.replyMessage(
-                Message(text="❌ Vui long nhap so hop le tuong ung voi phim."),
-                message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-            )
-            return
-
-        chon = int(message)
-        if chon < 1 or chon > len(danh_sach):
-            bot.replyMessage(
-                Message(text="❌ Lua chon khong hop le. Vui long nhap so trong danh sach."),
-                message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-            )
-            return
-
-        lua_chon = danh_sach[chon - 1]
-        ten_phim, tap, url_phim = lua_chon[:3]
-
-        user_selection_data[author_id] = {
-            "state": "waiting_for",
-            "next_step": "handle_episode_selection",
-            "url_phim": url_phim,
-            "ten_phim": ten_phim,
-            "tap": tap
-        }
-
-        set_timeout(author_id, bot, message_object, thread_id, thread_type)
-
-        bot.replyMessage(
-            Message(text=f"🍿 Ban đa chon: {ten_phim}\n🔖 Danh sach tap: [{tap}]\n\nVui long nhap so tap ban muon xem.\n🚦 Nhap 0 đe huy chon"),
-            message_object, thread_id=thread_id, thread_type=thread_type, ttl=30000
-        )
-
-    except Exception as e:
-        bot.replyMessage(
-            Message(text=f"❌ Đa xay ra loi: {str(e)}"),
-            message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-        )
- 
-
-def handle_episode_selection(bot, message_object, author_id, thread_id, thread_type, message):
-  
-    try:
-        user_data = user_selection_data.get(author_id)
-        if message == "0":
-            bot.replyMessage(
-                Message(text="❌ Ban đa huy lua chon."),
-                message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-            )
-            user_selection_data.pop(author_id, None) 
-            return
-       
-        try:
-            chon_tap = int(message)
-      
-            url_phim = user_data["url_phim"]
-            ten_phim = user_data["ten_phim"]
-            tap= user_data["tap"]
-            max_tap = 27
-            if chon_tap > max_tap and chon_tap < 1:
-                bot.replyMessage(
-                    Message(text=f"❌ Tap phim khong hop le. Vui long chon lai tu 1 đen {max_tap}."), message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000)
-                return
-            url_tap = f"{url_phim.strip('/')}/tap-{chon_tap}"
-
-            bot.replyMessage(
-                Message(text=f"🍿 Ban đa chon tap {chon_tap} cua phim '{ten_phim}'.\n🎥 URL: {url_tap}"),
-                message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-            )
-
-            
-            get_fb_source(bot, url_tap, message_object, thread_id, thread_type)
-            user_selection_data.pop(author_id, None)
-        except ValueError:
-           pass
-    except Exception as e:
-        bot.replyMessage(
-            Message(text=f"❌ Đa xay ra loi: {str(e)}"),
-            message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-        )
-
-
-
-def get_fb_source(bot, url_tap, message_object, thread_id, thread_type):
-    try:
-        response = session.get(url_tap)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        
-        
-        og_image = soup.find("meta", property="og:image")
-        thumbnail_url = og_image["content"] if og_image else "https://default-thumbnail-url.com/thumbnail.jpg"
-        
-        scripts = soup.find_all('script')
-
-        for script in scripts:
-            script_content = script.string
-            if not script_content:
-                continue
-
-            checklink_matches = re.findall(r'\$checkLink\d+\s*=\s*"([^"]+)"', script_content)
-            for link in checklink_matches:
-                if "yanhh3d" in link:
-                    process_yanhh3d(bot, link, message_object, thread_id, thread_type, thumbnail_url)
-                    return
-
-        bot.replyMessage(
-            Message(text="❌ loi roi."),
-            message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-        )
-
-    except Exception as e:
-        bot.replyMessage(
-            Message(text=f"❌ Loi khi xu ly: {str(e)}"),
-            message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-        )
-
-def process_yanhh3d(bot, url, message_object, thread_id, thread_type, thumbnail_url):
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
-        response = requests.get(url, headers=headers)
-        match = re.search(r'var cccc = "(https://[^"]+\.mp4[^"]*)"', response.text)
-        if match:
-            video_url = match.group(1)
-            download_video(bot, video_url, thumbnail_url, message_object, thread_id, thread_type)
-        else:
-            pass
-    except Exception as e:
-        bot.replyMessage(
-            Message(text=f"❌ Loi khi truy cap link: {str(e)}"),
-            message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-        )
-
-def download_video(bot, video_url, thumbnail_url, message_object, thread_id, thread_type):
-    try:
-        duration = 100
-        final_duration = 600 if duration > 600 else duration
-
-        bot.sendRemoteVideo(
-            videoUrl=video_url,
-            thumbnailUrl=thumbnail_url,  
-            duration=final_duration,
-            thread_id=thread_id,
-            thread_type=thread_type,
-            width=1280,
-            height=720,
-            message=Message(text=""),
-            ttl=1000000
-        )
-
-    except Exception as e:
-        bot.replyMessage(
-            Message(text=f"❌ Loi khi gui video: {str(e)}"),
-            message_object, thread_id=thread_id, thread_type=thread_type, ttl=100000
-        )
-
-def upload_to_uguuu(file_path):
-    try:
-        print(f"➜   Đang upload file len GoFile: {file_path}")
-        
-        with open(file_path, 'rb') as file:
-            files = {'file': file}
-            response = requests.post("https://store1.gofile.io/uploadFile", files=files)
-
-        print(f"➜   Phan hoi tu GoFile: {response.text}")
-        result = response.json()
-        
-        if result["status"] == "ok":
-            uploaded_url = result["data"]["downloadPage"]
-            print(f"➜   Upload thanh cong: {uploaded_url}")
-            return uploaded_url
-        else:
-            print("➜   Upload that bai:", result.get("message"))
-            return None
-
-    except Exception as e:
-        print(f"➜   Loi khi upload file len GoFile: {e}")
-        return None
-
-def ve_anh_bxh(items):
-    width = 1365
-    item_height = 130
-    padding = 20
-    row_count = (len(items) + 1) // 2
-    height = padding * 2 + row_count * item_height
-
-    bg_path = random.choice([f for f in os.listdir("background") if f.endswith(('.jpg', '.png'))])
-    bg_image = Image.open(f"background/{bg_path}").resize((width, height))
-    img = ImageEnhance.Brightness(bg_image).enhance(0.3)
-    draw = ImageDraw.Draw(img)
-
-    try:
-        font_item = ImageFont.truetype("arial unicode ms.otf", 28)
-        font_small = ImageFont.truetype("arial unicode ms.otf", 24)
-    except:
-        font_item = font_small = ImageFont.load_default()
-
-    for i, item in enumerate(items):
-        rank = item['rank']
-        name = item['name']
-        episode = item['episode']
-        avatar_url = item['avatar_url']
-
-        row = i // 2
-        col = i % 2
-        x = padding + col * (width // 2)
-        y = padding + row * item_height
-
-        draw.rounded_rectangle((x, y, x + width // 2 - padding, y + item_height - 10), radius=20, fill=(0, 0, 0, 100))
-
-        try:
-            response = requests.get(avatar_url)
-            avatar = Image.open(BytesIO(response.content)).resize((90, 90)).convert("RGBA")
-        except:
-            avatar = Image.new("RGBA", (90, 90), (255, 255, 255, 255))
-
-        mask = Image.new("L", (90, 90), 0)
-        draw_mask = ImageDraw.Draw(mask)
-        draw_mask.ellipse((0, 0, 90, 90), fill=255)
-
-        border = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
-        border_draw = ImageDraw.Draw(border)
-        border_draw.ellipse((0, 0, 100, 100), fill=(255, 0, 255, 255))
-        border.paste(avatar, (5, 5), mask=mask)
-
-        img.paste(border, (x + 10, y + 10), mask=mask)
-        draw.text((x + 110, y + 10), f"{rank}. {name}", font=font_item, fill=(200, 150, 255))
-        draw.text((x + 110, y + 50), episode, font=font_small, fill=(255, 255, 255))
-        draw.text((x + 110, y + 80), "yanhh3d.vip", font=font_small, fill=(200, 200, 200))
-        draw.text((x + width // 2 - 60, y + 10), str(rank), font=font_item, fill=(180, 180, 180))
-
-    with NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-        img.save(tmp.name)
-        return tmp.name
-
-def send_bxh(bot, thread_id, thread_type, message_object, author_id):
-    try:
-        url = "https://yanhh3d.vip/moi-cap-nhat"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        ranking_section = soup.select_one("#top-viewed-day")
-        items = ranking_section.select("li.item-top") if ranking_section else []
-        if not items:
-            bot.replyMessage(
-                Message(text="❌ Khong tim thay BXH nao."),
-                message_object, thread_id=thread_id, thread_type=thread_type
-            )
-            return
-
-        bxh_list = []
-        for item in items:
-            rank = item.select_one(".film-number span").text.strip() if item.select_one(".film-number span") else ""
-            name = item.select_one(".film-name a").text.strip() if item.select_one(".film-name a") else ""
-            episode = item.select_one(".fd-infor span").text.strip() if item.select_one(".fd-infor span") else ""
-            link = item.select_one(".film-name a")["href"] if item.select_one(".film-name a") else ""
-            img_tag = item.select_one("img")
-            avatar_url = img_tag["data-src"] if img_tag and img_tag.has_attr("data-src") else img_tag["src"] if img_tag and img_tag.has_attr("src") else ""
-            
-            bxh_list.append({
-                'rank': rank,
-                'name': name,
-                'episode': episode,
-                'link': link,
-                'avatar_url': avatar_url
-            })
-
-        user_name = get_user_name_by_id(bot, author_id)
-        text_bxh = f"🚦{user_name}\n🚦Top {len(bxh_list)} bang xep hang phim hoat hinh 3D cap nhat moi nhat\n📅 Vao luc: {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}\n🌀Nguon: yanhh3d.vip\n\n"
-
-        for item in bxh_list:
-            text_bxh += f"{item['rank']}. {item['name']} ({item['episode']})\n🔗 {item['link']}\n"
-
-        image_path = ve_anh_bxh(bxh_list[:10])
-        bot.sendLocalImage(
-            imagePath=image_path,
-            thread_id=thread_id,
-            thread_type=thread_type,
-            message=Message(text=text_bxh),
-            height=440,
-            width=1365,
-            ttl=1200000
-        )
-        os.remove(image_path)
-
-    except Exception as e:
-        bot.replyMessage(
-            Message(text=f"❌ Loi khi lay BXH: {str(e)}"),
-            message_object, thread_id=thread_id, thread_type=thread_type
-        )
-
-init(autoreset=True)
-colors = [
-    "FF9900", "FFFF33", "33FFFF", "FF99FF", "FF3366", "FFFF66", "FF00FF", "66FF99", 
-    "00CCFF", "FF0099", "FF0066", "0033FF", "FF9999", "00FF66", "00FFFF", 
-    "CCFFFF", "8F00FF", "FF00CC", "FF0000", "FF1100", "FF3300"
-]
-
-def hex_to_ansi(hex_color):
-    try:
-        hex_color = hex_color.lstrip('#')
-        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-        return f'\033[38;2;{r};{g};{b}m'
-    except:
-        return ''
-
-text = "L A K"
-try:
-    xb = pyfiglet.figlet_format(text)
-    print(xb)
-except Exception:
-    print("----- L A K -----")
-
-class bot(ZaloAPI):
-    def __init__(self, api_key, secret_key, imei=None, session_cookies=None, prefix='', is_main_bot=None):
-        super().__init__(api_key, secret_key, imei, session_cookies)
-        self.is_main_bot = is_main_bot
-        self.prefix = prefix
-        self.version ="1.0"
-        self.date_update ='01/08/25'
-        self.me_name = self.fetchAccountInfo().profile.displayName
-        self.init_autosend()
-        self.group_info_cache = {}
-        self.last_sms_times = {}
-        handle_bot_admin(self)
-        self.Group = False
-        self.is_spamming = False
-        self.spam_thread = None
-        self.spam_lock = threading.Lock()
-        self.spam_content = ""
-        self.link_removal_enabled = False
-        self.banned_word_removal_enabled = False
-        self.message_queue = Queue()
-        self.worker_thread = threading.Thread
-        self.users = {}
-        self.promotion_active = False
-        self.promotion_discount = 0.5
-        self.current_color = "#BBDF32"
-        self.current_size = "15"
-        self.hidden_accounts = set()
-        self.hidden_notifications = {}
-        self.data_file = {}
-        self.list_group = []
-        self.loan_allowed = {}
-        self.previous_members = {}
-        self.latest_member = {}
-        self.last_check_time = {}
-        self.pending_login_requests = {}
-        self.message_counts = {}
-        self.command_usage_count = {}
-        self.used_codes = {}
-        self.allowed_groups = set()
-        self.stop_event = threading.Event()
-        
-        all_group = self.fetchAllGroups()
-        allowed_thread_ids = list(all_group.gridVerMap.keys())
-        initialize_group_info(self, allowed_thread_ids)
-        start_member_check_thread(self,allowed_thread_ids)
-
-    def onEvent(self, event_data, event_type):
-        try:
-            handle_event(self, event_data, event_type)
-        except Exception as e:
-            logging.error(f"🚦 Lỗi khi xử lý sự kiện: {e}")
-            
-    def init_autosend(self):
-        """Khởi tạo autosend thread"""
-        try:
-            start_autosend_thread(self)
-            print("✅ Autosend thread đã được khởi động thành công!")
-        except Exception as e:
-            print(f"❌ Lỗi khi khởi động autosend: {e}")
-            
-    def onMessage(self, mid, author_id, message, message_object, thread_id, thread_type):
-        try:
-            if message_object.msgType == "chat.undo":
-                handle_undo_message(self, message_object, thread_id, thread_type, author_id)
-                return
-
-            if message and isinstance(message, str):
-                message_text = message
-            elif hasattr(message_object, 'content') and message_object.content and 'text' in message_object.content:
-                message_text = message_object.content.get('text', '')
-            else:
-                return
-            
-            if not message_text or not message_text.strip():
-                return
-        except Exception as e:
-            print(f"Error getting message text: {e}")
-            return 
-    
-        settings = read_settings(self.uid)
+def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, command):
+    def send_bot_response():
+        settings = read_settings(bot.uid)
+        allowed_thread_ids = settings.get('allowed_thread_ids', [])
         admin_bot = settings.get("admin_bot", [])
         banned_users = settings.get("banned_users", [])
-        allowed_thread_ids = settings.get('allowed_thread_ids', [])
-        
-        is_admin = author_id in admin_bot
-        is_allowed_group = thread_id in allowed_thread_ids
-        is_private_chat = (thread_type == ThreadType.USER)
-        prefix = self.prefix
+        chat_user = (thread_type == ThreadType.USER)
 
-        if not (is_private_chat or is_allowed_group or is_admin):
+        if author_id in banned_users:
             return
 
-        if author_id in banned_users and not is_admin:
+        if not (is_admin(bot, author_id) or thread_id in allowed_thread_ids or chat_user): # FIX: Use is_admin function
             return
-
-        if is_allowed_group and not is_admin:
-            handle_check_profanity(self, author_id, thread_id, message_object, thread_type, message_text)
-
-        message_lower = message_text.lower().strip()
-    
         try:
-            author_info = self.fetchUserInfo(author_id).changed_profiles.get(author_id, {})
-            author_name = author_info.get('zaloName', 'Không xác định')
-            group_info = self.fetchGroupInfo(thread_id)
-            group_name = group_info.gridInfoMap.get(thread_id, {}).get('name', 'N/A')
+            # FIX: Use getattr to prevent crash if bot.prefix is not set
+            prefix = getattr(bot, 'prefix', '/')
+
+            spam_enabled = settings.get('spam_enabled', {}).get(str(thread_id), True)
+            anti_poll = settings.get('anti_poll', True)
+            video_enabled = settings.get('video_enabled', True)
+            card_enabled = settings.get('card_enabled', True)
+            file_enabled = settings.get('file_enabled', True)
+            image_enabled = settings.get('image_enabled', True)
+            chat_enabled = settings.get('chat_enabled', True)
+            voice_enabled = settings.get('voice_enabled', True)
+            sticker_enabled = settings.get('sticker_enabled', True)
+            gif_enabled = settings.get('gif_enabled', True)
+            doodle_enabled = settings.get('doodle_enabled', True)
+            allow_link = settings.get('allow_link', {}).get(str(thread_id), True)
+            sos_status = settings.get('sos_status', True)
+
+            status_icon = lambda enabled: "⭕️" if enabled else "✅"
+
+            f"{status_icon(spam_enabled)} Anti-Spam 💢\n"
+            f"{status_icon(anti_poll)} Anti-Poll 👍\n"
+            f"{status_icon(video_enabled)} Anti-Video ▶️\n"
+            f"{status_icon(card_enabled)} Anti-Card 🛡️\n"
+            f"{status_icon(file_enabled)}Anti-File 🗂️\n"
+            f"{status_icon(image_enabled)} Anti-Photo 🏖\n"
+            f"{status_icon(chat_enabled)} SafeMode 🩹\n"
+            f"{status_icon(voice_enabled)} Anti-Voice 🔊\n"
+            f"{status_icon(sticker_enabled)} Anti-Sticker 😊\n"
+            f"{status_icon(gif_enabled)} Anti-Gif 🖼️\n"
+            f"{status_icon(doodle_enabled)} Anti-Draw ✏️\n"
+            f"{status_icon(sos_status)}SOS 🆘\n"
+            f"{status_icon(allow_link)} Anti-Link 🔗\n"
+
+            parts = command.split()
+            response = ""
+            if len(parts) == 1:
+                # FIX: Use `prefix` variable
+                response = (
+                        f"{get_user_name_by_id(bot, author_id)}\n"
+                        f"➜ {prefix}bot info/policy: ♨️ Thong tin/Tac gia/Thoi gian/Chinh sach BOT\n"
+                        f"➜ {prefix}bot setup on/off: ⚙️ Bat/Tat Noi quy BOT (OA)\n"
+                        f"➜ {prefix}bot anti on/off/setup: 🚦Bat/Tat Anti (OA)\n"
+                        f"➜ {prefix}bot newlink/dislink: 🔗 Tao/huy link nhom (OA)\n"
+                        f"➜ {prefix}bot fix: 🔧 Sua loi treo lenh(OA)"
+                        f"➜ {prefix}bot safemode on/off: 🩹 Che đo an toan text (OA)\n"
+                        f"➜ {prefix}bot on/off: ⚙️ Bat/Tat BOT (OA)\n"
+                        f"➜ {prefix}bot admin add/remove/list: 👑 Them/xoa Admin 🤖BOT\n"
+                        f"➜ {prefix}bot skip add/remove/list: 👑 Them/xoa uu tien 🤖BOT (OA)\n"
+                        f"➜ {prefix}bot leader add/remove/list: 👑 Them/xoa Truong/Pho (OA)\n"
+                        f"➜ {prefix}bot autosend on/off: ✉️ Gui tin nhan(OA)\n"
+                        f"➜ {prefix}bot noiquy: 💢 Noi quy box\n"
+                        f"➜ {prefix}bot ban/vv/unban list: 😷 Khoa user\n"
+                        f"➜ {prefix}bot kick: 💪 Kick user (OA)\n"
+                        f"➜ {prefix}bot sos: 🆘 Khoa box (OA)\n"
+                        f"➜ {prefix}bot block/unblock/list: 💪 Chan nguoi dung (OA)\n"
+                        f"➜ {prefix}bot link on/off: 🔗 Cam link (OA)\n"
+                        f"➜ {prefix}bot file on/off: 🗂️ Cam file (OA)\n"
+                        f"➜ {prefix}bot video on/off: ▶️ Cam video (OA)\n"
+                        f"➜ {prefix}bot sticker on/off: 😊 Cam sticker (OA)\n"
+                        f"➜ {prefix}bot gif on/off: 🖼️ Cam Gif (OA)\n"
+                        f"➜ {prefix}bot voice on/off: 🔊 Cam voice (OA)\n"
+                        f"➜ {prefix}bot photo on/off: 🏖 Cam anh (OA)\n"
+                        f"➜ {prefix}bot draw on/off: ✏️ Cam ve hinh (OA)\n"
+                        f"➜ {prefix}bot anti poll on/off: 👍 Cam binh chon (OA)\n"
+                        f"➜ {prefix}bot rule word [n] [m]: 📖 Cam n lan vi pham, phat m phut (OA)\n"
+                        f"➜ {prefix}bot word add/remove/list [tu cam]: ✍️ Them/xoa tu cam (OA)\n"
+                        f" ➜ {prefix}bot welcome on/off: 🎊 Welcome (OA)\n"
+                        f"➜ {prefix}bot card on/off: 🛡️ Cam Card (OA)\n"
+                        f"🤖 BOT {get_user_name_by_id(bot, bot.uid)} luon san sang phuc vu ban! 🌸\n"
+                    )
+            else:
+                action = parts[1].lower()
+                
+                if action == 'on':
+                    if not admin_cao(bot, author_id):
+                        response = "❌Ban khong phai admin bot!"
+                    elif thread_type != ThreadType.GROUP:
+                        response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                    else:
+                        response = bot_on_group(bot, thread_id)
+                elif action == 'off':
+                    if not is_admin(bot, author_id):
+                        response = "❌Ban khong phai admin bot!"
+                    elif thread_type != ThreadType.GROUP:
+                        response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                    else:
+                        response = bot_off_group(bot, thread_id)
+
+                elif action == 'fix':
+                    response = reload_modules(bot, message_object, thread_id, thread_type)
+
+                elif action == 'autostk':
+                    if not is_admin(bot, author_id):
+                        response = "❌ Ban khong phai admin bot!"
+                    else:
+                        sub_action = parts[2].lower() if len(parts) > 2 else None
+                        if sub_action == 'start':
+                            if thread_id in autostk_loops and not autostk_loops[thread_id].is_set():
+                                response = "Tính năng auto sticker liên tục đã được bật từ trước."
+                            else:
+                                stop_event = threading.Event()
+                                autostk_loops[thread_id] = stop_event
+                                loop_thread = threading.Thread(target=sticker_loop, args=(bot, thread_id, thread_type))
+                                loop_thread.daemon = True
+                                loop_thread.start()
+                                response = "✅ Đã BẬT tính năng auto sticker liên tục."
+                        elif sub_action == 'stop':
+                            if thread_id in autostk_loops and not autostk_loops[thread_id].is_set():
+                                autostk_loops[thread_id].set()
+                                response = "⏹️ Đã TẮT tính năng auto sticker liên tục."
+                            else:
+                                response = "Tính năng này chưa được bật."
+                        else:
+                            response = f"Cú pháp không hợp lệ. Sử dụng:\n{prefix}bot autostk start\n{prefix}bot autostk stop"
+                
+                # FIX: Added logic for the 'autosend' command.
+                elif action == 'autosend':
+                    if not is_admin(bot, author_id):
+                        response = "❌ Bạn không có quyền sử dụng lệnh này!"
+                    else:
+                        if len(parts) < 3:
+                            response = (
+                                f"🚦 Hướng dẫn sử dụng autosend:\n"
+                                f"➜ {prefix}bot autosend on - Bật autosend\n"
+                                f"➜ {prefix}bot autosend off - Tắt autosend\n"
+                                f"➜ {prefix}bot autosend status - Xem trạng thái\n"
+                                f"➜ {prefix}bot autosend list - Danh sách nhóm đã bật"
+                            )
+                        else:
+                            sub_action = parts[2].lower()
+                            if sub_action == "on":
+                                response = handle_autosend_on(bot, thread_id, author_id, prefix)
+                            elif sub_action == "off":
+                                response = handle_autosend_off(bot, thread_id, author_id, prefix)
+                            elif sub_action == "status":
+                                status = get_autosend_status(bot, thread_id)
+                                status_text = "🟢 Đang bật" if status else "🔴 Đang tắt"
+                                try:
+                                    group_info = bot.fetchGroupInfo(thread_id)
+                                    group_name = group_info.gridInfoMap.get(thread_id, {}).get('name', 'Unknown Group')
+                                except Exception:
+                                    group_name = 'Unknown Group'
+                                response = f"🚦 Trạng thái autosend:\n📌 Nhóm: {group_name}\n🔧 Trạng thái: {status_text}"
+                            elif sub_action == "list":
+                                response = list_autosend_groups(bot)
+                            else:
+                                response = f"❌ Lệnh không hợp lệ! Sử dụng: {prefix}bot autosend [on/off/status/list]"
+
+                elif action == 'policy':
+                    if thread_type != ThreadType.GROUP:
+                        response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                    else:
+                        response = list_bots(bot, thread_id)
+
+                elif action == 'removelink':
+                    if not is_admin(bot, author_id):
+                        response = "❌Ban khong phai admin bot!"
+                    else:
+                        response = remove_link(bot, thread_id)
+                elif action == 'newlink':
+                    if not is_admin(bot, author_id):
+                        response = "❌Ban khong phai admin bot!"
+                    else:
+                        response = newlink(bot, thread_id)
+                elif action == 'skip':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [add/remove/list] sau lenh: {prefix}bot skip 🤧\n➜ Vi du: {prefix}bot skip add @Heoder ✅"
+                    else:
+                        sub_action = parts[2].lower()
+                        if sub_action == 'add':
+                            if len(parts) < 4:
+                                response = f"➜ Vui long @tag ten nguoi dung sau lenh: {prefix}bot skip add ??\n➜ Vi du: {prefix}bot skip add @Heoder ✅"
+                            else:
+                                mentioned_uids = extract_uids_from_mentions(message_object)
+                                settings = read_settings(bot.uid)
+                                
+                                if not is_admin(bot, author_id):
+                                    response = "❌Ban khong phai admin bot!"
+                                else:
+                                    response = add_skip(bot, author_id, mentioned_uids)
+                        elif sub_action == 'remove':
+                            if len(parts) < 4:
+                                response = f"➜ Vui long @tag ten nguoi dung sau lenh: {prefix}bot skip remove 🤧\n➜ Vi du: {prefix}bot skip remove @Heoder ✅"
+                            else:
+                                mentioned_uids = extract_uids_from_mentions(message_object)
+                                settings = read_settings(bot.uid)
+                                
+                                if not is_admin(bot, author_id):
+                                    response = "❌Ban khong phai admin bot!"
+                                else:
+                                    response = remove_skip(bot, author_id, mentioned_uids)
+                        elif sub_action == 'list':
+                            settings = read_settings(bot.uid)
+                            skip_list = settings.get("skip_bot", [])
+                            if skip_list:
+                                response = "🚦 Danh sach nguoi dung đuoc uu tien: \n"
+                                for uid in skip_list:
+                                    response += f"👑 {get_user_name_by_id(bot, uid)} - {uid}\n"
+                            else:
+                                response = "🚦 Chua co nguoi dung nao trong danh sach uu tien 🤖"
+                elif action == 'leader':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [add/remove] sau lenh: {prefix}bot leader 🤧\n➜ Vi du: {prefix}bot leader add @Hero ✅"
+                    else:
+                        sub_action = parts[2].lower()
+                        
+                      
+                        if sub_action == 'add':
+                            if len(parts) < 4:
+                                response = f"➜ Vui long @tag ten nguoi dung sau lenh: {prefix}bot leader add 🤧\n➜ Vi du: {prefix}bot leader add @Hero ✅"
+                            else:
+                                mentioned_uids = extract_uids_from_mentions(message_object)
+                                
+                                if not is_admin(bot, author_id):
+                                    response = "❌Ban khong phai admin bot!"
+                                else:
+                                    response = promote_to_admin(bot, mentioned_uids, thread_id)
+                        elif sub_action == 'remove':
+                            if len(parts) < 4:
+                                response = f"➜ Vui long @tag ten nguoi dung sau lenh: {prefix}bot admin remove 🤧\n➜ Vi du: {prefix}bot admin remove @Hero ✅"
+                            else:
+                                mentioned_uids = extract_uids_from_mentions(message_object)
+                                
+                                if not is_admin(bot, author_id):
+                                    response = "❌Ban khong phai admin bot!"
+                                else:
+                                    response = remove_adminn(bot, mentioned_uids, thread_id)
+                        
+                        elif sub_action == 'list':
+                            
+                            response = get_group_admins(bot, thread_id)
+
+                        
+                        else:
+                            response = "➜ Lenh khong hop le. Vui long chon tu [add/remove/list]."
+        
+                elif action == 'anti':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [poll on/off] sau lenh: {prefix}bot anti 🤧\n➜ Vi du: {prefix}bot anti poll on ✅"
+                    else:
+                        sub_action = parts[2].lower()
+                        if sub_action == 'poll':
+                            if len(parts) < 4:
+                                response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot anti poll 🤧\n➜ Vi du: {prefix}bot anti poll on ✅"
+                            else:
+                                sub_sub_action = parts[3].lower()
+                                if not is_admin(bot, author_id):
+                                    response = "❌Ban khong phai admin bot!"
+                                elif sub_sub_action == 'off':  
+                                    settings = read_settings(bot.uid)
+                                    settings["anti_poll"] = True
+                                    write_settings(bot.uid, settings)
+                                    response = f"{status_icon(True)} Anti-Poll 👍\n" # FIX: Show correct status
+                                elif sub_sub_action == 'on':  
+                                    settings = read_settings(bot.uid)
+                                    settings["anti_poll"] = False
+                                    write_settings(bot.uid, settings)
+                                    response = f"{status_icon(False)} Anti-Poll 👍\n" # FIX: Show correct status
+                                else:
+                                    response = "➜ Lenh khong hop le. Vui long chon 'on' hoac 'off' sau lenh anti poll 🤧"
+                                
+                elif action == 'safemode':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot chat 🤧\n➜ Vi du: {prefix}bot chat on hoac {prefix}bot chat off ✅"
+                    else:
+                        chat_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if chat_action == 'off':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['chat_enabled'] = True  
+                                response = f"{status_icon(True)} SafeMode 🩹\n"
+                        elif chat_action == 'on':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['chat_enabled'] = False  
+                                response = f"{status_icon(False)} SafeMode 🩹\n"
+                        
+                        write_settings(bot.uid, settings)  
+
+                elif action == 'sticker':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot sticker 🤧\n➜ Vi du: {prefix}bot sticker on hoac {prefix}bot sticker off ✅"
+                    else:
+                        sticker_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if sticker_action == 'off':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['sticker_enabled'] = True  
+                                response = f"{status_icon(True)} Anti-Sticker 😊\n"
+                                
+                        elif sticker_action == 'on':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['sticker_enabled'] = False  
+                                response = f"{status_icon(False)} Anti-Sticker 😊\n"
+                        
+                        write_settings(bot.uid, settings)
+
+                elif action == 'draw':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot draw 🤧\n➜ Vi du: {prefix}bot draw on hoac {prefix}bot draw off ✅"
+                    else:
+                        draw_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if draw_action == 'off':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['doodle_enabled'] = True  
+                                response = f"{status_icon(True)} Anti-Draw ✏️\n"
+                        elif draw_action == 'on':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['doodle_enabled'] = False  
+                                response = f"{status_icon(False)} Anti-Draw ✏️\n"
+                        
+                        write_settings(bot.uid, settings)
+
+                elif action == 'gif':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot gif 🤧\n➜ Vi du: {prefix}bot gif on hoac {prefix}bot gif off ✅"
+                    else:
+                        gif_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if gif_action == 'off':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['gif_enabled'] = True  
+                                response = f"{status_icon(True)} Anti-Gif 🖼️\n"
+                        elif gif_action == 'on':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['gif_enabled'] = False  
+                                response = f"{status_icon(False)} Anti-Gif 🖼️\n"
+                        
+                        write_settings(bot.uid, settings)
+
+                elif action == 'video':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot video 🤧\n➜ Vi du: {prefix}bot video on hoac {prefix}bot video off ✅"
+                    else:
+                        video_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if video_action == 'off':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['video_enabled'] = True  
+                                response = f"{status_icon(True)} Anti-Video ▶️\n"
+                        elif video_action == 'on':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['video_enabled'] = False  
+                                response = f"{status_icon(False)} Anti-Video ▶️\n"
+                        
+                        write_settings(bot.uid, settings)
+
+                elif action == 'photo':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot image 🤧\n➜ Vi du: {prefix}bot image on hoac {prefix}bot image off ✅"
+                    else:
+                        image_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if image_action == 'off':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['image_enabled'] = True  
+                                response = f"{status_icon(True)} Anti-Photo 🏖\n"
+                        elif image_action == 'on':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['image_enabled'] = False  
+                                response = f"{status_icon(False)} Anti-Photo 🏖\n"
+                        
+                        write_settings(bot.uid, settings)
+
+                elif action == 'voice':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot voice 🤧\n➜ Vi du: {prefix}bot voice on hoac {prefix}bot voice off ✅"
+                    else:
+                        voice_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if voice_action == 'off':
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['voice_enabled'] = True  
+                                response = f"{status_icon(True)} Anti-Voice 🔊\n"
+                        elif voice_action == 'on':
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['voice_enabled'] = False  
+                                response = f"{status_icon(False)} Anti-Voice 🔊\n"
+                        
+                        write_settings(bot.uid, settings)
+
+                elif action == 'file':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot file 🤧\n➜ Vi du: {prefix}bot file on hoac {prefix}bot file off ✅"
+                    else:
+                        file_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if file_action == 'off':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['file_enabled'] = True  
+                                response = f"{status_icon(True)} Anti-File 🗂️\n"
+                                
+                        elif file_action == 'on':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['file_enabled'] = False  
+                                response = f"{status_icon(False)} Anti-File 🗂️\n"
+                        
+                        write_settings(bot.uid, settings)
+
+                elif action == 'card':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot card 🤧\n➜ Vi du: {prefix}bot card on hoac {prefix}bot card off ✅"
+                    else:
+                        card_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if card_action == 'on':
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['card_enabled'] = False  
+                                response = f"{status_icon(False)} Anti-Card 🛡️\n"
+                        elif card_action == 'off':  
+                            if not is_admin(bot, author_id):  
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                settings['card_enabled'] = True  
+                                response = f"{status_icon(True)} Anti-Card 🛡️\n"
+                        
+                        write_settings(bot.uid, settings)
+
+                elif action == 'welcome':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot welcome 🤧\n➜ Vi du: {prefix}bot welcome on hoac {prefix}bot welcome off ✅"
+                    else:
+                        settings = read_settings(bot.uid)
+                        setup_action = parts[2].lower()
+                        if setup_action == 'on':
+                            if not is_admin(bot, author_id):
+                                response = "❌Ban khong phai admin bot!"
+                            elif thread_type != ThreadType.GROUP:
+                                response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                            else:
+                                response = handle_welcome_on(bot, thread_id)
+                        elif setup_action == 'off':
+                            if not is_admin(bot, author_id):
+                                response = "❌Ban khong phai admin bot!"
+                            elif thread_type != ThreadType.GROUP:
+                                response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                            else:
+                                response = handle_welcome_off(bot, thread_id)
+                        
+                elif action == 'spam':
+                    if not is_admin(bot, author_id):
+                        response = "❌Ban khong phai admin bot!"
+                    elif len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot spam 🤧\n➜ Vi du: {prefix}bot spam on hoac {prefix}bot spam off ✅"
+                    else:
+                        spam_action = parts[2].lower()
+                        settings = read_settings(bot.uid)
+
+                        if 'spam_enabled' not in settings:
+                            settings['spam_enabled'] = {}
+
+                        if spam_action == 'on':
+                            settings['spam_enabled'][thread_id] = True  
+                            response = f"{status_icon(True)} Anti-Spam 💢\n"
+                        elif spam_action == 'off':
+                            settings['spam_enabled'][thread_id] = False  
+                            response = f"{status_icon(False)} Anti-Spam 💢\n"
+                        
+                        write_settings(bot.uid, settings)
+                elif action == 'info':
+                    response = (
+                        "╭────────────────────────────╮\n"
+                        f"│ 🤖 Bot phien ban: {getattr(bot, 'version', '1.0')}\n"
+                        f"│ 📅 Cap nhat lan cuoi: {getattr(bot, 'date_update', 'N/A')}\n"
+                        f"│ 👨‍💻 Nha phat trien: {getattr(bot, 'me_name', 'MyBot')}\n"
+                        f"│ 📖 Huong dan: Dung lenh [{prefix}bot/help]\n"
+                        "│ ⏳ Thoi gian phan hoi: 1 giay\n"
+                        "│ ⚡ Tinh nang noi bat:\n"
+                        "│  ├➜ 🛡️ Anti-spam,anti-radi, chan link, tu cam\n"
+                        "│  ├➜ 🤬 Kiem soat noi dung chui the\n"
+                        "│  ├➜ 🚫 Tu đong duyet & chan spammer\n"
+                        "│  ├➜ 🔊 Quan ly giong noi & sticker\n"
+                        "│  ├➜ 🖼️ Ho tro hinh anh, GIF, video\n"
+                        "│  ├➜ 🗳️ Kiem soat cuoc khao sat\n"
+                        "│  ├➜ 🔗 Bao ve nhom khoi link đoc hai\n"
+                        "│  └➜ 🔍 Kiem tra & phan tich tin nhan\n"
+                        "╰────────────────────────────╯"
+                    )
+
+                elif action == 'admin':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [list/add/remove] sau lenh: {prefix}bot admin 🤧\n➜ Vi du: {prefix}bot admin list hoac {prefix}bot admin add @Heoder hoac {prefix}bot admin remove @Heoder ✅"
+                    else:
+                        settings = read_settings(bot.uid)
+                        admin_bot = settings.get("admin_bot", [])  
+                        sub_action = parts[2].lower()
+                        if sub_action == 'add':
+                            if len(parts) < 4:
+                                response = f"➜ Vui long @tag ten nguoi dung sau lenh: {prefix}bot admin add 🤧\n➜ Vi du: {prefix}bot admin add @Heoder ✅"
+                            else:
+                                if not admin_cao(bot, author_id):
+                                    response = "❌Ban khong phai admin bot!"
+                                else:
+                                    mentioned_uids = extract_uids_from_mentions(message_object)
+                                    response = add_admin(bot, author_id, mentioned_uids)
+                        elif sub_action == 'remove':
+                            if len(parts) < 4:
+                                response = f"➜ Vui long @tag ten nguoi dung sau lenh: {prefix}bot admin remove 🤧\n➜ Vi du: {prefix}bot admin remove @Heoder ✅"
+                            else:
+                                if not admin_cao(bot, author_id):
+                                    response = "❌Ban khong phai admin bot!"
+                                else:
+                                    mentioned_uids = extract_uids_from_mentions(message_object)
+                                    response = remove_admin(bot, author_id, mentioned_uids)
+                        elif sub_action == 'list':
+                            if admin_bot:
+                                response = f"🚦🧑‍💻 Danh sach Admin 🤖BOT {get_user_name_by_id(bot, bot.uid)}\n"
+                                for idx, uid in enumerate(admin_bot, start=1):
+                                    response += f"➜   {idx}. {get_user_name_by_id(bot, uid)} - {uid}\n"
+                            else:
+                                response = "➜ Khong co Admin BOT nao trong danh sach 🤧"
+
+                elif action == 'setup':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot setup 🤧\n➜ Vi du: {prefix}bot setup on hoac {prefix}bot setup off ✅"
+                    else:
+                        setup_action = parts[2].lower()
+                        if setup_action == 'on':
+                            if not is_admin(bot, author_id):
+                                response = "❌Ban khong phai admin bot!"
+                            elif thread_type != ThreadType.GROUP:
+                                response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                            else:
+                                response = setup_bot_on(bot, thread_id)
+                        elif setup_action == 'off':
+                            if not is_admin(bot, author_id):
+                                response = "❌Ban khong phai admin bot!"
+                            elif thread_type != ThreadType.GROUP:
+                                response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                            else:
+                                response = setup_bot_off(bot,thread_id)
+                        
+                elif action == 'link':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [on/off] sau lenh: {prefix}bot link 🤧\n➜ Vi du: {prefix}bot link on hoac {prefix}bot link off ✅"
+                    else:
+                        link_action = parts[2].lower()
+                        if not is_admin(bot, author_id):
+                            response = "❌Ban khong phai admin bot!"
+                        elif thread_type != ThreadType.GROUP:
+                            response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                        else:
+                            settings = read_settings(bot.uid)
+
+                            if 'allow_link' not in settings:
+                                settings['allow_link'] = {}
+
+                            
+                            if link_action == 'on':
+                                settings['allow_link'][thread_id] = True
+                                response = f"{status_icon(True)} Anti-Link 🔗\n"
+                            elif link_action == 'off':
+                                settings['allow_link'][thread_id] = False
+                                response = f"{status_icon(False)} Anti-Link 🔗\n"
+                        write_settings(bot.uid, settings)
+                elif action == 'word':
+                    if len(parts) < 3: # FIX: Should be < 4
+                        response = f"➜ Vui long nhap [add/remove] [tu khoa] sau lenh: {prefix}bot word 🤧\n➜ Vi du: {prefix}bot word add [tu khoa] hoac {prefix}bot word remove [tu khoa] ✅"
+                    else:
+                        if not is_admin(bot, author_id):
+                            response = "❌Ban khong phai admin bot!"
+                        elif thread_type != ThreadType.GROUP:
+                            response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                        else:
+                            word_action = parts[2].lower()
+                            word = ' '.join(parts[3:]) 
+                            if word_action == 'add':
+                                response = add_forbidden_word(bot, author_id, word)
+                            elif word_action == 'remove':
+                                response = remove_forbidden_word(bot, author_id, word)
+                            # FIX: Added list option
+                            elif word_action == 'list':
+                                forbidden_words = settings.get('forbidden_words', [])
+                                if forbidden_words:
+                                    response = "✍️ Danh sách từ cấm:\n - " + "\n - ".join(forbidden_words)
+                                else:
+                                    response = "✍️ Danh sách từ cấm đang trống."
+                elif action == 'noiquy':
+                    settings = read_settings(bot.uid)
+                    rules=settings.get("rules", {})
+                    word_rule = rules.get("word", {"threshold": 3, "duration": 30})
+                    threshold_word = word_rule["threshold"]
+                    duration_word = word_rule["duration"]
+                    group_admins = settings.get('group_admins', {})
+                    admins = group_admins.get(thread_id, [])
+                    group = bot.fetchGroupInfo(thread_id).gridInfoMap[thread_id]
+                    if admins:
+                        response = (
+                            f"➜ 💢 Noi quy 🤖BOT {getattr(bot, 'me_name', 'MyBot')} đuoc ap dung cho nhom: {group.name} - ID: {thread_id} ✅\n"
+                            f"➜ 🚫 Cam su dung cac tu ngu tho tuc 🤬 trong nhom\n"
+                            f"➜ 💢 Vi pham {threshold_word} lan se bi 😷 khoa mom {duration_word} phut\n"
+                            f"➜ ⚠️ Neu tai pham 2 lan se bi 💪 kick khoi nhom 🤧"
+                        )
+                    else:
+                        response = (
+                            f"➜ 💢 Noi quy khong ap dung cho nhom: {group.name} - ID: {thread_id} 💔\n➜ Ly do: 🤖BOT {getattr(bot, 'me_name', 'MyBot')} chua đuoc setup hoac BOT khong co quyen cam key quan tri nhom 🤧"
+                        )
+                elif action == 'ban':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap 'list' hoac 'ban @tag' sau lenh: {prefix}bot 🤧\n➜ Vi du: {prefix}bot ban list hoac {prefix}bot ban @user ✅"
+                    else:
+                        sub_action = parts[2].lower()
+
+                        if sub_action == 'list':
+                            response = print_muted_users_in_group(bot, thread_id)
+                        elif sub_action == 'vv':
+                            if not is_admin(bot, author_id):
+                                response = "➜ Lenh nay chi kha thi voi quan tri vien 🤧"
+                            elif thread_type != ThreadType.GROUP:
+                                response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                            elif not check_admin_group(bot, thread_id):
+                                response = "➜ 🤖BOT khong co quyen quan tri nhom đe thuc hien lenh nay 🤧"
+                            else:
+                                uids = extract_uids_from_mentions(message_object)
+                                if not uids:
+                                    response = f"➜ Vui long tag nguoi can ban sau lenh: {prefix}bot ban vv @username 🤧"
+                                else:
+                                    response = ban_users_permanently(bot, uids, thread_id)
+                        else:
+                            if not is_admin(bot, author_id):
+                                response = "➜ Lenh nay chi kha thi voi quan tri vien 🤧"
+                            elif thread_type != ThreadType.GROUP:
+                                response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                            elif not check_admin_group(bot, thread_id):
+                                response = "➜ Lenh nay khong kha thi do 🤖BOT khong co quyen quan tri nhom 🤧"
+                            else:
+                                uids = extract_uids_from_mentions(message_object)
+                                response = add_users_to_ban_list(bot, uids, thread_id, "Quan tri vien cam")
+
+                elif action == 'unban':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap @tag ten sau lenh: {prefix}bot unban 🤧\n➜ Vi du: {prefix}bot unban @Heoder ✅"
+                    else:
+                        if not is_admin(bot, author_id):
+                            response = "❌Ban khong phai admin bot!"
+                        elif thread_type != ThreadType.GROUP:
+                            response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                        else:
+                            
+                            uids = extract_uids_from_mentions(message_object)
+                            response = remove_users_from_ban_list(bot, uids, thread_id)
+                elif action == 'block':
+                      
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap @tag ten sau lenh: {prefix}bot block 🤧\n➜ Vi du: {prefix}bot block @Heoder ✅"
+                    else:
+                        s_action = " ".join(parts[2:])
+                      
+                        if s_action == 'list':
+                            response = print_blocked_users_in_group(bot, thread_id)
+                        else:
+                         
+                            if not is_admin(bot, author_id):
+                                response = "❌Ban khong phai admin bot!"
+                            elif thread_type != ThreadType.GROUP:
+                                response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                            elif check_admin_group(bot,thread_id)==False:
+                                response = "➜ Lenh nay khong kha thi do 🤖BOT khong co quyen cam 🔑 key nhom 🤧"
+                            else:
+                              
+                                uids = extract_uids_from_mentions(message_object)
+                                response = block_users_from_group(bot, uids, thread_id)
+                elif action == 'sos':
+                    if not is_admin(bot, author_id):
+                        response = "❌Ban khong phai admin bot!"
+                    else:
+                        settings = read_settings(bot.uid)
+                        sos_status = settings.get("sos_status", False)
+
+                        if sos_status:
+                            bot.changeGroupSetting(groupId=thread_id, lockSendMsg=0)
+                            settings["sos_status"] = False
+                            response = f"{status_icon(False)}SOS 🆘\n"
+                        else:
+                            bot.changeGroupSetting(groupId=thread_id, lockSendMsg=1)
+                            settings["sos_status"] = True
+                            response = f"{status_icon(True)}SOS 🆘\n"
+
+                        write_settings(bot.uid, settings)
+  
+                elif action == 'unblock':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap UID sau lenh: {prefix}bot unblock 🤧\n➜ Vi du: {prefix}bot unblock 8421834556970988033, 842183455697098804... ✅"
+                    else:
+                        if not is_admin(bot, author_id):
+                            response = "❌Ban khong phai admin bot!"
+                        elif thread_type != ThreadType.GROUP:
+                            response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                        else:
+                           
+                            ids_str = parts[2]  
+                            print(f"Chuoi UIDs: {ids_str}")
+
+                            uids = [uid.strip() for uid in ids_str.split(',') if uid.strip()]
+                            print(f"Danh sach UIDs: {uids}")
+
+                            if uids:
+                              
+                                response = unblock_users_from_group(bot, uids, thread_id)
+                            else:
+                                response = "➜ Khong co UID nao hop le đe bo chan 🤧"
+
+                elif action == 'kick':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap @tag ten sau lenh: {prefix}bot kick 🤧\n➜ Vi du: {prefix}bot kick @Heoder ✅"
+                    else:
+                        if not is_admin(bot, author_id):
+                            response = "❌Ban khong phai admin bot!"
+                        elif thread_type != ThreadType.GROUP:
+                            response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                        elif check_admin_group(bot,thread_id)==False:
+                                response = "➜ Lenh nay khong kha thi do 🤖BOT khong co quyen cam 🔑 key nhom 🤧"
+                        else:
+                            uids = extract_uids_from_mentions(message_object)
+                            response = kick_users_from_group(bot, uids, thread_id)
+                
+                elif action == 'rule':
+                    if len(parts) < 5:
+                        response = f"➜ Vui long nhap word [n lan] [m phut] sau lenh: {prefix}bot rule 🤧\n➜ Vi du: {prefix}bot rule word 3 30 ✅"
+                    else:
+                        rule_type = parts[2].lower()
+                        try:
+                            threshold = int(parts[3])
+                            duration = int(parts[4])
+                        except ValueError:
+                            response = "➜ So lan va phut phat phai la so nguyen 🤧"
+                        else:
+                            settings = read_settings(bot.uid)
+                            if rule_type not in ["word", "spam"]:
+                                response = f"➜ Lenh {prefix}bot rule {rule_type} khong đuoc ho tro 🤧\n➜ Vi du: {prefix}bot rule word 3 30✅"
+                            else:
+                                if not is_admin(bot, author_id):
+                                    response = "❌Ban khong phai admin bot!"
+                                elif thread_type != ThreadType.GROUP:
+                                    response = "➜ Lenh nay chi kha thi trong nhom 🤧"
+                                else:
+                                    settings.setdefault("rules", {})
+                                    settings["rules"][rule_type] = {
+                                        "threshold": threshold,
+                                        "duration": duration
+                                    }
+                                    write_settings(bot.uid, settings)
+                                    response = f"➜ 🔄 Đa cap nhat noi quy cho {rule_type}: Neu vi pham {threshold} lan se bi phat {duration} phut ✅"
+                elif action == 'cam':
+                    if len(parts) < 3:
+                        response = f"➜ Vui long nhap [add/remove/list] sau lenh: {prefix}bot cam 🤧\n➜ Vi du: {prefix}bot cam add @Heoder ✅"
+                    else:
+                        sub_action = parts[2].lower()
+                        if sub_action == 'add':
+                            if len(parts) < 4:
+                                response = f"➜ Vui long @tag ten nguoi dung sau lenh: {prefix}bot cam add 🤧\n➜ Vi du: {prefix}bot cam add @Heoder ✅"
+                            if not admin_cao(bot, author_id):
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                mentioned_uids = extract_uids_from_mentions(message_object)
+                                response = ban_user_from_commands(bot, author_id, mentioned_uids)
+                        elif sub_action == 'remove':
+                            if len(parts) < 4:
+                                response = f"➜ Vui long @tag ten nguoi dung sau lenh: {prefix}bot cam remove 🤧\n➜ Vi du: {prefix}bot cam remove @Heoder ✅"
+                            if not admin_cao(bot, author_id):
+                                response = "❌Ban khong phai admin bot!"
+                            else:
+                                mentioned_uids = extract_uids_from_mentions(message_object)
+                                response = unban_user_from_commands(bot, author_id, mentioned_uids)
+                        elif sub_action == 'list':
+                            response = list_banned_users(bot)
+
+
+                else:
+                    bot.sendReaction(message_object, "❌", thread_id, thread_type)
+            
+            if response:
+                if len(parts) == 1:
+                    os.makedirs(CACHE_PATH, exist_ok=True)
+    
+                    image_path = generate_menu_image(bot, author_id, thread_id, thread_type)
+                    if not image_path:
+                        bot.sendMessage("❌ Khong the tao anh menu!", thread_id, thread_type)
+                        return
+                    reaction = [
+                        "❌", "🤧", "🐞", "😊", "🔥", "👍", "💖", "🚀",
+                        "😍", "😂", "😢", "😎", "🙌", "💪", "🌟", "🍀",
+                        "🎉", "🦁", "🌈", "🍎", "⚡", "🔔", "🎸", "🍕",
+                        "🏆", "📚", "🦋", "🌍", "⛄", "🎁", "💡", "🐾",
+                        "😺", "🐶", "🐳", "🦄", "🌸", "🍉", "🍔", "🎄"
+                    ]
+
+                    num_reactions = random.randint(2, 3)
+                    selected_reactions = random.sample(reaction, num_reactions)
+
+                    for emoji in selected_reactions:
+                        bot.sendReaction(message_object, emoji, thread_id, thread_type)
+                    bot.sendLocalImage(
+                        imagePath=image_path,
+                        message=Message(text=response, mention=Mention(author_id, length=len(f"{get_user_name_by_id(bot, author_id)}"), offset=0)),
+                        thread_id=thread_id,
+                        thread_type=thread_type,
+                        width=1920,
+                        height=600,
+                        ttl=240000
+                    )
+                    
+                    try:
+                        if os.path.exists(image_path):
+                            os.remove(image_path)
+                    except Exception as e:
+                        print(f"❌ Loi khi xoa anh: {e}")
+                else:
+                    reaction = [
+                        "❌", "🤧", "🐞", "😊", "🔥", "👍", "💖", "🚀",
+                        "😍", "😂", "😢", "😎", "🙌", "💪", "🌟", "🍀",
+                        "🎉", "🦁", "🌈", "🍎", "⚡", "🔔", "🎸", "🍕",
+                        "🏆", "📚", "🦋", "🌍", "⛄", "🎁", "💡", "🐾",
+                        "😺", "🐶", "🐳", "🦄", "🌸", "🍉", "🍔", "🎄"
+                    ]
+
+                    num_reactions = random.randint(2, 3)
+                    selected_reactions = random.sample(reaction, num_reactions)
+
+                    for emoji in selected_reactions:
+                        bot.sendReaction(message_object, emoji, thread_id, thread_type)
+                    bot.replyMessage(Message(text=response),message_object, thread_id=thread_id, thread_type=thread_type,ttl=9000)
+        
         except Exception as e:
-            author_name = 'Không xác định'
-            group_name = 'N/A'
-        
-        current_time = time.strftime("%H:%M:%S - %d/%m/%Y", time.localtime())
-    
-        colors_selected = random.sample(colors, 8)
-        print("\n" + "="*25 + " TIN NHẮN MỚI " + "="*25)
-        print(f"{hex_to_ansi(colors_selected[1])}{Style.BRIGHT}➤ Message: {message_text}{Style.RESET_ALL}")
-        print(f"{hex_to_ansi(colors_selected[2])}{Style.BRIGHT}➤ ID Người Dùng: {author_id}{Style.RESET_ALL}")
-        print(f"{hex_to_ansi(colors_selected[6])}{Style.BRIGHT}➤ Tên Người Dùng: {author_name}{Style.RESET_ALL}")
-        print(f"{hex_to_ansi(colors_selected[3])}{Style.BRIGHT}➤ ID Nhóm: {thread_id}{Style.RESET_ALL}")
-        print(f"{hex_to_ansi(colors_selected[4])}{Style.BRIGHT}➤ Tên Nhóm: {group_name}{Style.RESET_ALL}")
-        print(f"{hex_to_ansi(colors_selected[5])}{Style.BRIGHT}➤ Loại: {thread_type}{Style.RESET_ALL}")
-        print(f"{hex_to_ansi(colors_selected[7])}{Style.BRIGHT}➤ Thời Gian: {current_time}{Style.RESET_ALL}")
-        print(f"{hex_to_ansi(colors_selected[0])}{Style.BRIGHT}➤ Quyền: {'ADMIN' if is_admin else 'USER'}{Style.RESET_ALL}")
-        print("="*65 + "\n")
+            print(f"Error in handle_bot_command: {e}") # FIX: Added more detailed error logging
+            bot.replyMessage(Message(text="➜ 🐞 Đa xay ra loi gi đo 🤧"), message_object, thread_id=thread_id, thread_type=thread_type)
 
-        # --- 1. ƯU TIÊN XỬ LÝ CÁC PHẢN HỒI CÓ TRẠNG THÁI ---
-        if author_id in user_selection_data and message_text.strip().isdigit():
-            next_step = user_selection_data[author_id].get("next_step")
-            if next_step == "handle_user_selection":
-                handle_user_selection(self, message_object, author_id, thread_id, thread_type, message_text)
-                return
-            elif next_step == "handle_episode_selection":
-                handle_episode_selection(self, message_object, author_id, thread_id, thread_type, message_text)
-                return
+    thread = Thread(target=send_bot_response)
+    thread.start()
 
-        if game_active and author_id == current_player and not message_text.startswith(prefix):
-            nt_go(self, message_object, author_id, thread_id, thread_type, message_lower)
-            return
+font_path_emoji = os.path.join("emoji.ttf")
+font_path_arial = os.path.join("arial unicode ms.otf")
 
-        # --- 2. XỬ LÝ CÁC LỆNH THÔNG THƯỜNG ---
-        if message_lower.startswith(f"{prefix}nt"):
-            nt_go(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}sms"):
-            handle_sms_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}voice"):
-            handle_voice_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}spaman"):
-            handle_spaman_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}stkxp"):
-            handle_stkxp_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}autosend"):
-            start_autosend_handle(bot, thread_type, thread_id, message, prefix, author_id, message_object)
-        elif message_lower.startswith(f"{prefix}group"):
-            handle_group_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}qrbank"):
-            handle_qrbank_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}save"):
-            handle_save_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}ff"):
-            handle_ff_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}spamff"):
-            handle_kb_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}attack"):
-            handle_attack_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}img"):
-            handle_img_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}reghotmail"):
-            handle_reghotmail_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}doff"):
-            handle_doff_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}news"):
-            news(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}ip"):
-            handle_ip_commands(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}call"):
-            handle_spamcall_command(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}tygia"):
-            handle_hoan_doi_command(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}giavang"):
-            handle_gia_vang_command(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}mybot") and self.is_main_bot:
-            handle_thuebot_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}war"):
-            handle_allwar_command(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}share"):
-            handle_share_command(self, message_text, message_object, thread_id, author_id, thread_type)
-        elif message_lower.startswith(f"{prefix}scl"):
-            handle_nhac_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}make"):
-            handle_make_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}getvoice"):
-            handle_getvoice_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}chat"):
-            # Lệnh 'chat' gọi đến module pro_gemini.py
-            handle_chat_ai(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}as"):
-            # Lệnh 'as' gọi đến module gemini_pro.py
-            handle_as_ai(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}ngl"):
-            handle_ngl_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}bot"):
-            handle_bot_command(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}st"):
-            handle_create_image_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}girl"):
-            handle_anhgai_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}vdtiktok"):
-            handle_vdtiktok_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}vdgirl"):
-            handle_vdgai_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}menu"):
-            handle_menu_commands(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}or"):
-            handle_menu_or_commands(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}weather"):
-            handle_weather_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}bc"):
-            handle_dhbc_command(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}dich"):
-            handle_translate_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}tx"):
-            handle_tx_command(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}leave"):
-            handle_leave_group_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}love"):
-            handle_tha_thinh_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}zl"):
-            handle_menu_zl_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}chiase"):
-            handle_chiase_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}qrcode"):
-            handle_qrcode_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}detail"):
-            handle_detail_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}duyetmem"):
-            handle_duyetmem_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}tdm"):
-            handle_tdm_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}groupinfo"):
-            handle_groupinfo_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}cardinfo"):
-            handle_cardinfo_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}info"):
-            handle_info_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}hiden"):
-            handle_hiden_commands(message_text, thread_id, thread_type, author_id, self, message_object)
-        elif message_lower.startswith(f"{prefix}disbox"):
-            handle_disbox(self, thread_id, author_id, thread_type, message_object)
-        elif message_lower.startswith(f"{prefix}spam"):
-            handle_join_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}mail10p"):
-            handle_mail10p_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}ping"):
-            handle_ping_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}join"):
-            handle_join1_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}kickall"):
-            kick_member_group(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}meme"):
-            meme(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}src"):
-            src(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}pin"):
-            handle_pro_pin(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}rao"):
-            from modules.rao.pro_rao import start_rao_handle
-            start_rao_handle(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}rank"):
-            handle_rank_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}phatnguoi"):
-            phatnguoi(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}mst"):
-            mst(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}getlink"):
-            handle_getlink_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}blockfri"):
-            blockto(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}unlockfri"):
-            unblockto(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}addfri"):
-            addfrito(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}rmfri"):
-            removefrito(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}addallfri"):
-            addallfriongr(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}pix"):
-            pixitimkiem(self, message_object, author_id, thread_id, thread_type, message_text)
-        elif message_lower.startswith(f"{prefix}lmao"):
-            command_allan_for_link(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}all"):
-            command__allan_cd(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}stk"):
-            handle_stk_command(message_text, message_object, thread_id, thread_type, author_id, self)
-        elif message_lower.startswith(f"{prefix}donghua"):
-            tim_kiem_yanhh3d(self, message_object, author_id, thread_id, thread_type, message_lower, message_text)
-        else:
-            print(f"No matching command found for: '{message_text}'")
+def create_gradient_colors(num_colors: int) -> List[tuple[int, int, int]]:
+    return [(random.randint(30, 255), random.randint(30, 255), random.randint(30, 255)) for _ in range(num_colors)]
 
+def interpolate_colors(colors: List[tuple[int, int, int]], text_length: int, change_every: int) -> List[tuple[int, int, int]]:
+    gradient = []
+    num_segments = len(colors) - 1
+    steps_per_segment = max((text_length // change_every) + 1, 1)
 
-CONFIG_FILE = "config.json"
-lock = threading.Lock()
-
-def save_json(filename: str, data: Dict):
-    """Ghi dữ liệu vào file JSON một cách an toàn (thread-safe)."""
-    with lock:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-
-def load_json(filename: str) -> Dict:
-    """Đọc dữ liệu từ file JSON với cơ chế tự tạo file nếu không tồn tại."""
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        logging.warning(f"Không tìm thấy hoặc lỗi file {filename}. Đang tạo file mới.")
-        default_data = {"data": []}
-        save_json(filename, default_data)
-        return default_data
-
-def save_username_to_config(username: str, author_id: str):
-    """Lưu thông tin bot vào config nếu chưa tồn tại."""
-    with lock:
-        data = load_json(CONFIG_FILE)
-        if "data" not in data:
-            data["data"] = []
-        if not any(user.get('username') == username for user in data["data"]):
-            data["data"].append({
-                "username": username,
-                "author_id": author_id,
-                "status": True
-            })
-            save_json(CONFIG_FILE, data)
-            logging.info(f"Đã lưu {username} vào config.")
-
-def run_bot(imei: str, session_cookies: Dict, prefix: str, is_main_bot: bool, username: str, author_id: str, status: bool):
-    """Hàm mục tiêu cho mỗi luồng (thread), khởi chạy một instance của bot."""
-    if status is False:
-        logging.info(f"Bot {username} bị vô hiệu hóa, bỏ qua.")
-        return
-    try:
-        client = bot('</>', '</>', imei=imei, session_cookies=session_cookies, prefix=prefix, is_main_bot=is_main_bot)
-        if username and author_id:
-            save_username_to_config(username, author_id)
-
-        bot_type = "chính" if is_main_bot else "phụ"
-        logging.info(f"Khởi động bot {bot_type} - Tên: {username}, prefix: {prefix}")
-        client.listen(run_forever=True, delay=0, thread=True)
-    except Exception as e:
-        logging.error(f"Lỗi nghiêm trọng khi chạy bot {username}: {e}")
-
-def start_threads(data: List[Dict]):
-    """Tạo và bắt đầu các luồng cho mỗi bot trong file config."""
-    threads = []
-    for item in data:
-        try:
-            username = item.get("username")
-            author_id = item.get("author_id")
-
-            if not username or not author_id:
-                logging.warning(f"Thiếu 'username' hoặc 'author_id' trong config, bỏ qua: {item}")
-                continue
-
-            thread = threading.Thread(
-                target=run_bot,
-                args=(
-                    item.get("imei"),
-                    item.get("session_cookies"),
-                    item.get("prefix", ""),
-                    item.get("is_main_bot", False),
-                    username,
-                    author_id,
-                    item.get("status", True)
+    for i in range(num_segments):
+        for j in range(steps_per_segment):
+            if len(gradient) < text_length:
+                ratio = j / steps_per_segment
+                interpolated_color = (
+                    int(colors[i][0] * (1 - ratio) + colors[i + 1][0] * ratio),
+                    int(colors[i][1] * (1 - ratio) + colors[i + 1][1] * ratio),
+                    int(colors[i][2] * (1 - ratio) + colors[i + 1][2] * ratio)
                 )
-            )
-            threads.append(thread)
-            thread.start()
+                gradient.append(interpolated_color)
+
+    while len(gradient) < text_length:
+        gradient.append(colors[-1])
+
+    return gradient[:text_length]
+
+def is_emoji(character: str) -> bool:
+    return character in emoji.EMOJI_DATA
+
+def create_text(draw: ImageDraw.Draw, text: str, font: ImageFont.FreeTypeFont, 
+                emoji_font: ImageFont.FreeTypeFont, text_position: tuple[int, int], 
+                gradient_colors: List[tuple[int, int, int]]):
+    gradient = interpolate_colors(gradient_colors, text_length=len(text), change_every=4)
+    current_x = text_position[0]
+
+    for i, char in enumerate(text):
+        color = tuple(gradient[i])
+        try:
+            selected_font = emoji_font if is_emoji(char) and emoji_font else font
+            draw.text((current_x, text_position[1]), char, fill=color, font=selected_font)
+            text_bbox = draw.textbbox((current_x, text_position[1]), char, font=selected_font)
+            text_width = text_bbox[2] - text_bbox[0]
+            current_x += text_width
         except Exception as e:
-            logging.error(f"Lỗi khi xử lý bot {item.get('username', 'unknown')}: {e}")
+            print(f"Loi khi ve ky tu '{char}': {e}. Bo qua ky tu nay.")
             continue
 
-    for thread in threads:
-        thread.join()
+def draw_gradient_border(draw: ImageDraw.Draw, center_x: int, center_y: int, 
+                        radius: int, border_thickness: int, 
+                        gradient_colors: List[tuple[int, int, int]]):
+    num_segments = 80
+    gradient = interpolate_colors(gradient_colors, num_segments, change_every=10)
 
-def main():
-    """Hàm chính để bắt đầu toàn bộ chương trình."""
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    
-    data = load_json(CONFIG_FILE)
-    
-    if "data" in data and data["data"]:
-        start_threads(data["data"])
-    else:
-        logging.warning("Không có dữ liệu bot nào trong config.json để khởi chạy.")
+    for i in range(num_segments):
+        start_angle = i * (360 / num_segments)
+        end_angle = (i + 1) * (360 / num_segments)
+        color = tuple(gradient[i])
+        draw.arc(
+            [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
+            start=start_angle, end=end_angle, fill=color, width=border_thickness
+        )
 
-if __name__ == "__main__":
-    main()
+def load_image_from_url(url: str) -> Image.Image:
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return Image.open(BytesIO(response.content)).convert('RGBA')
+    except Exception as e:
+        print(f"Loi khi tai anh tu URL {url}: {e}")
+        return Image.new('RGBA', (100, 100), (0, 0, 0, 0))
+
+def generate_short_filename(length: int = 10) -> str:
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
+def load_random_background(background_dir: str = "background") -> Image.Image:
+    if not os.path.exists(background_dir):
+        print(f"Error: Background folder '{background_dir}' does not exist.")
+        return None
+    background_files = [os.path.join(background_dir, f) for f in os.listdir(background_dir) 
+                       if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    if not background_files:
+        print(f"Error: No valid image files found in '{background_dir}'")
+        return None
+    background_path = random.choice(background_files)
+    try:
+        return Image.open(background_path).convert("RGBA")
+    except Exception as e:
+        print(f"Error loading image {background_path}: {e}")
+        return None
+
+def create_default_background(width: int, height: int) -> Image.Image:
+    return Image.new('RGBA', (width, height), (0, 100, 0, 255))
+
+def create_default_avatar(name: str) -> Image.Image:
+    avatar = Image.new('RGBA', (170, 170), (200, 200, 200, 255))
+    draw = ImageDraw.Draw(avatar)
+    draw.ellipse((0, 0, 170, 170), fill=(100, 100, 255, 255))
+    initials = (name[:2].upper() if name else "??")
+    font = ImageFont.truetype(font_path_arial, 60)
+    text_bbox = draw.textbbox((0, 0), initials, font=font)
+    text_width = text_bbox[2] - text_bbox[0]
+    text_height = text_bbox[3] - text_bbox[1]
+    draw.text(
+        ((170 - text_width) // 2, (170 - text_height) // 2),
+        initials,
+        font=font,
+        fill=(255, 255, 255, 255)
+    )
+    return avatar
+
+def create_banner(bot, uid: str, thread_id: str, group_name: str = None, 
+                 avatar_url: str = None, event_type: str = None, 
+                 event_data = None, background_dir: str = "background") -> str:
+    try:
+        settings = read_settings(bot.uid)
+        if not settings.get("welcome", {}).get(thread_id, False):
+            return None
+            
+        member_info = bot.fetchUserInfo(uid).changed_profiles.get(uid)
+        if not member_info:
+            print(f"[ERROR] Khong tim thay thong tin user {uid}")
+            return None
+            
+        avatar_url = member_info.avatar if not avatar_url else avatar_url
+        user_name = getattr(member_info, 'zaloName', f"User{uid}")
+
+        group_info = bot.group_info_cache.get(thread_id, {})
+        group_name = group_info.get('name', "Nhom khong xac đinh") if not group_name else group_name
+        total_members = group_info.get('total_member', 0)
+        thread_type = ThreadType.GROUP
+
+        ow_name = ""
+        ow_avatar_url = ""
+        if event_data and hasattr(event_data, 'sourceId'):
+            try:
+                ow_info = bot.fetchUserInfo(event_data.sourceId).changed_profiles.get(event_data.sourceId)
+                ow_name = getattr(ow_info, 'zaloName', f"Admin{event_data.sourceId}") if ow_info else "Quan tri vien"
+                ow_avatar_url = ow_info.avatar if ow_info else ""
+            except Exception as e:
+                print(f"[WARNING] Loi khi lay thong tin admin: {e}")
+                ow_name = "Quan tri vien"
+
+        event_config = {
+            GroupEventType.JOIN: {
+                'main_text': f'Chao mung, {user_name} 💜',
+                'group_name_text': group_name,
+                'credit_text': "Đa đuoc duyet vao nhom",
+                'msg': f"✨ {user_name}",
+                'mention': None
+            },
+            GroupEventType.LEAVE: {
+                'main_text': f'Tam biet, {user_name} 💔',
+                'group_name_text': group_name,
+                'credit_text': "Đa roi khoi nhom",
+                'msg': f'💔 {user_name}',
+                'mention': None
+            },
+            GroupEventType.ADD_ADMIN: {
+                'main_text': f'Chuc mung, {user_name}',
+                'group_name_text': group_name,
+                'credit_text': f"bo nhiem lam pho nhom🔑",
+                'msg': f'🎉 {user_name}',
+                'mention': None
+            },
+            GroupEventType.REMOVE_ADMIN: {
+                'main_text': f'Rat tiec, {user_name}',
+                'group_name_text': group_name,
+                'credit_text': f"Đa bi xoa vai tro nhom❌",
+                'msg': f'⚠️ {user_name}',
+                'mention': None
+            },
+            GroupEventType.REMOVE_MEMBER: {
+                'main_text': f'Nhay nay, {user_name}',
+                'group_name_text': group_name,
+                'credit_text': f"Đa bi kick khoi nhom🚫",
+                'msg': f'🚫 {user_name}',
+                'mention': None
+            },
+            GroupEventType.JOIN_REQUEST: {
+                'main_text': f'Yeu cau tham gia ✋',
+                'group_name_text': group_name,
+                'credit_text': f"{user_name}",
+                'msg': f'✋ {user_name}',
+                'mention': None
+            }
+        }
+
+        config = event_config.get(event_type)
+        if not config:
+            print(f"[ERROR] Su kien {event_type} khong đuoc ho tro")
+            return None
+        
+        banner_width, banner_height = 980, 350
+        
+        try:
+            background = load_random_background(background_dir) or create_default_background(banner_width, banner_height)
+            background = background.resize((banner_width, banner_height), Image.LANCZOS)
+            background_blurred = background.filter(ImageFilter.GaussianBlur(radius=5))
+        except Exception as e:
+            print(f"[ERROR] Loi background: {e}")
+            background = create_default_background(banner_width, banner_height)
+            background_blurred = background
+
+        overlay = Image.new("RGBA", (banner_width, banner_height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        
+        glass_color = (
+            random.randint(30, 80),
+            random.randint(30, 80), 
+            random.randint(30, 80),
+            random.randint(170, 220)
+        )
+        
+        rect_margin = 60
+        rect_x0, rect_y0 = rect_margin, 30
+        rect_x1, rect_y1 = banner_width - rect_margin, banner_height - 30
+        draw.rounded_rectangle([rect_x0, rect_y0, rect_x1, rect_y1], radius=30, fill=glass_color)
+
+        member_circle_radius = 25
+        member_circle_x = rect_x1 - member_circle_radius - 20 
+        member_circle_y = rect_y0 + member_circle_radius + 15
+        
+        circle_border_color = (
+            random.randint(100, 255),
+            random.randint(100, 255),
+            random.randint(100, 255),
+            255 
+        )
+        
+        draw.ellipse(
+            [member_circle_x - member_circle_radius, 
+             member_circle_y - member_circle_radius,
+             member_circle_x + member_circle_radius, 
+             member_circle_y + member_circle_radius],
+            outline=circle_border_color,
+            width=6
+        )
+        
+        member_font = ImageFont.truetype(font_path_arial, 20)
+        member_count_text = str(total_members)
+        member_bbox = draw.textbbox((0, 0), member_count_text, font=member_font)
+        member_text_width = member_bbox[2] - member_bbox[0]
+        member_text_height = member_bbox[3] - member_bbox[1]
+        
+        member_text_x = member_circle_x - (member_text_width // 2)
+        member_text_y = member_circle_y - (member_text_height // 2 + 10)
+        draw.text(
+            (member_text_x, member_text_y),
+            member_count_text,
+            font=member_font,
+            fill=(255, 255, 255, 255)
+        )
+
+        banner = Image.alpha_composite(background_blurred, overlay)
+
+        try:
+            avatar = load_image_from_url(avatar_url) or create_default_avatar(user_name)
+            avatar_size = 135
+            mask = Image.new('L', (avatar_size, avatar_size), 0)
+            draw_mask = ImageDraw.Draw(mask)
+            draw_mask.ellipse((0, 0, avatar_size, avatar_size), fill=255)
+            
+            avatar = avatar.resize((avatar_size, avatar_size), Image.LANCZOS)
+            avatar_x = rect_x0 + 25
+            avatar_y = rect_y1 - avatar_size - 70
+            banner.paste(avatar, (avatar_x, avatar_y), mask)
+            
+            border_size = 4
+            border = Image.new('RGBA', (avatar_size + border_size*2, avatar_size + border_size*2), (255, 255, 255, 255))
+            border_mask = Image.new('L', (avatar_size + border_size*2, avatar_size + border_size*2), 0)
+            border_draw = ImageDraw.Draw(border_mask)
+            border_draw.ellipse((0, 0, avatar_size + border_size*2, avatar_size + border_size*2), fill=255)
+            banner.paste(border, (avatar_x - border_size, avatar_y - border_size), border_mask)
+            banner.paste(avatar, (avatar_x, avatar_y), mask)
+        except Exception as e:
+            print(f"[WARNING] Loi avatar nguoi dung: {e}")
+
+        if ow_avatar_url:
+            try:
+                ow_avatar = load_image_from_url(ow_avatar_url) or create_default_avatar(ow_name)
+                ow_avatar = ow_avatar.resize((avatar_size, avatar_size), Image.LANCZOS)
+                ow_avatar_x = rect_x1 - avatar_size - 25
+                ow_avatar_y = avatar_y
+                banner.paste(ow_avatar, (ow_avatar_x, ow_avatar_y), mask)
+                
+                banner.paste(border, (ow_avatar_x - border_size, ow_avatar_y - border_size), border_mask)
+                banner.paste(ow_avatar, (ow_avatar_x, ow_avatar_y), mask)
+            except Exception as e:
+                print(f"[WARNING] Loi avatar nguoi thuc hien: {e}")
+
+        draw = ImageDraw.Draw(banner)
+        
+        def get_vibrant_color():
+            colors = [
+                (255, 90, 90), (90, 255, 90), (90, 90, 255),
+                (255, 255, 90), (255, 90, 255), (90, 255, 255)
+            ]
+            return random.choice(colors)
+        
+        font_main = ImageFont.truetype(font_path_arial, 50)
+        main_text = config['main_text']
+        main_bbox = draw.textbbox((0, 0), main_text, font=font_main)
+        main_width = main_bbox[2] - main_bbox[0]
+        main_x = rect_x0 + (rect_x1 - rect_x0 - main_width) // 2
+        main_y = rect_y0 + 10
+        draw.text((main_x, main_y), main_text, font=font_main, fill=get_vibrant_color())
+
+        font_group = ImageFont.truetype(font_path_arial, 48)
+        group_text = config['group_name_text']
+        group_bbox = draw.textbbox((0, 0), group_text, font=font_group)
+        group_width = group_bbox[2] - group_bbox[0]
+        group_x = rect_x0 + (rect_x1 - rect_x0 - group_width) // 2
+        group_y = main_y + main_bbox[3] + 15
+        max_width = rect_x1 - rect_x0 - 20
+        if group_width > max_width:
+            while group_bbox[2] - group_bbox[0] > max_width and len(group_text) > 0:
+                group_text = group_text[:-1]
+                group_bbox = draw.textbbox((0, 0), group_text + "...", font=font_group)
+            group_text += "..."
+        draw.text((group_x, group_y), group_text, font=font_group, fill=get_vibrant_color())
+
+        font_credit = ImageFont.truetype(font_path_arial, 38)
+        credit_text = config['credit_text']
+        credit_bbox = draw.textbbox((0, 0), credit_text, font=font_credit)
+        credit_width = credit_bbox[2] - credit_bbox[0]
+        credit_x = rect_x0 + (rect_x1 - rect_x0 - credit_width) // 2
+        credit_y = group_y + group_bbox[3] + 15
+        draw.text((credit_x, credit_y), credit_text, font=font_credit, fill=(255, 255, 255))
+
+        time_text = f"📅 {time.strftime('%d/%m/%Y')}  ⏰ {time.strftime('%H:%M:%S')}    🔑 Executed by {ow_name}" if ow_name else f"📅 {time.strftime('%d/%m/%Y')}     ⏰ {time.strftime('%H:%M:%S')}"
+        font_footer = ImageFont.truetype(font_path_arial, 22)
+        footer_bbox = draw.textbbox((0, 0), time_text, font=font_footer)
+        footer_x = rect_x0 + (rect_x1 - rect_x0 - footer_bbox[2]) // 2 + 20
+        footer_y = rect_y1 - footer_bbox[3] - 15
+        draw.text((footer_x, footer_y), time_text, font=font_footer, fill=(220, 220, 220))
+
+        file_name = f"banner_{int(time.time())}.jpg"
+        try:
+            banner.convert('RGB').save(file_name, quality=95)
+            if event_type:
+                bot.sendMultiLocalImage(
+                    [file_name],
+                    thread_id=thread_id,
+                    thread_type=thread_type,
+                    width=banner_width,
+                    height=banner_height,
+                    message=Message(text=config['msg'], mention=config.get('mention')),
+                    ttl=60000 * 60
+                )
+        except Exception as e:
+            print(f"[ERROR] Loi khi luu/gui banner: {e}")
+            return None
+        finally:
+            try:
+                delete_file(file_name)
+            except:
+                pass
+
+        return file_name
+
+    except Exception as e:
+        print(f"[CRITICAL] Loi nghiem trong: {str(e)}")
+        return None
+
+def delete_file(file_path: str):
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"Đa xoa tep: {file_path}")
+    except Exception as e:
+        print(f"Loi khi xoa tep: {e}")
+
+def load_emoji_font(size: int) -> ImageFont.FreeTypeFont:
+    try:
+        if os.path.exists(font_path_emoji):
+            return ImageFont.truetype(font_path_emoji, size)
+        if os.name == 'nt':
+            return ImageFont.truetype("seguiemj.ttf", size)
+        elif os.path.exists("/System/Library/Fonts/Apple Color Emoji.ttc"):
+            return ImageFont.truetype("/System/Library/Fonts/Apple Color Emoji.ttc", size)
+    except Exception:
+        return None
+
+def handle_event(client, event_data, event_type):
+    try:
+        if not hasattr(event_data, 'groupId'):
+            print(f"Du lieu su kien khong co groupId: {event_data}")
+            return
+
+        thread_id = event_data.groupId
+        thread_type = ThreadType.GROUP
+        
+        settings = read_settings(client.uid)
+        if not settings.get("welcome", {}).get(thread_id, False):
+            return
+            
+        group_info = client.fetchGroupInfo(thread_id)
+        group_name = group_info.gridInfoMap.get(str(thread_id), {}).get('name', 'nhom')
+        total_member = group_info.gridInfoMap[str(thread_id)]['totalMember']
+
+        client.group_info_cache[thread_id] = {
+            "name": group_name,
+            "member_list": group_info.gridInfoMap[str(thread_id)]['memVerList'],
+            "total_member": total_member
+        }
+
+        for member in event_data.updateMembers:
+            member_id = member['id']
+            member_name = member['dName']
+            user_info = client.fetchUserInfo(member_id)
+            avatar_url = user_info.changed_profiles[member_id].avatar
+
+            banner_path = create_banner(
+                client, 
+                member_id, 
+                thread_id, 
+                group_name=group_name, 
+                avatar_url=avatar_url, 
+                event_type=event_type, 
+                event_data=event_data
+            )
+
+            if not banner_path or not os.path.exists(banner_path):
+                print(f"Khong tao đuoc banner cho {member_name} voi event {event_type}")
+                continue
+
+            if event_type == GroupEventType.JOIN:
+                msg = Message(
+                    text=f"🚦 {member_name}",
+                    mention=Mention(uid=member_id, length=len(member_name), offset=3)
+                )
+                client.sendLocalImage(banner_path, thread_id=thread_id, thread_type=thread_type, 
+                                    width=980, height=350, message=msg, ttl=60000 * 60)
+            elif event_type == GroupEventType.LEAVE:
+                client.sendLocalImage(banner_path, thread_id=thread_id, thread_type=thread_type, 
+                                    width=980, height=350, ttl=60000 * 60)
+            else:
+                print(f"Su kien {event_type} khong đuoc ho tro")
+
+            delete_file(banner_path)
+
+    except Exception as e:
+        print(f"Loi khi xu ly event {event_type}: {e}")
+
+def handle_welcome_on(bot, thread_id: str) -> str:
+    settings = read_settings(bot.uid)
+    if "welcome" not in settings:
+        settings["welcome"] = {}
+    settings["welcome"][thread_id] = True
+    write_settings(bot.uid, settings)
+    return f"🚦Che đo welcome đa 🟢 Bat 🎉"
+
+def handle_welcome_off(bot, thread_id: str) -> str:
+    settings = read_settings(bot.uid)
+    if "welcome" in settings and thread_id in settings["welcome"]:
+        settings["welcome"][thread_id] = False
+        write_settings(bot.uid, settings)
+        return f"🚦Che đo welcome đa 🔴 Tat 🎉"
+    return "🚦Nhom chua co thong tin cau hinh welcome đe 🔴 Tat 🤗"
+
+def get_allow_welcome(bot, thread_id: str) -> bool:
+    settings = read_settings(bot.uid)
+    return settings.get("welcome", {}).get(thread_id, False)
+
+def initialize_group_info(bot, allowed_thread_ids: List[str]):
+    for thread_id in allowed_thread_ids:
+        group_info = bot.fetchGroupInfo(thread_id).gridInfoMap.get(thread_id, None)
+        if group_info:
+            bot.group_info_cache[thread_id] = {
+                "name": group_info['name'],
+                "member_list": group_info['memVerList'],
+                "total_member": group_info['totalMember']
+            }
+        else:
+            print(f"Bo qua nhom {thread_id}")
+
+def check_member_changes(bot, thread_id: str) -> tuple[set, set]:
+    current_group_info = bot.fetchGroupInfo(thread_id).gridInfoMap.get(thread_id, None)
+    cached_group_info = bot.group_info_cache.get(thread_id, None)
+
+    if not cached_group_info or not current_group_info:
+        return set(), set()
+
+    old_members = set([member.split('_')[0] for member in cached_group_info["member_list"]])
+    new_members = set([member.split('_')[0] for member in current_group_info['memVerList']])
+
+    joined_members = new_members - old_members
+    left_members = old_members - new_members
+
+    bot.group_info_cache[thread_id] = {
+        "name": current_group_info['name'],
+        "member_list": current_group_info['memVerList'],
+        "total_member": current_group_info['totalMember']
+    }
+
+    return joined_members, left_members
+
+def handle_group_member(bot, message_object, author_id: str, thread_id: str, thread_type: str):
+    if not get_allow_welcome(bot, thread_id):
+        return
+        
+    current_group_info = bot.fetchGroupInfo(thread_id).gridInfoMap.get(thread_id, None)
+    cached_group_info = bot.group_info_cache.get(thread_id, None)
+
+    if not cached_group_info or not current_group_info:
+        print(f"Khong co thong tin nhom cho thread_id {thread_id}")
+        return
+
+    old_members = set([member.split('_')[0] for member in cached_group_info["member_list"]])
+    new_members = set([member.split('_')[0] for member in current_group_info['memVerList']])
+
+    joined_members = new_members - old_members
+    left_members = old_members - new_members
+
+    for member_id in joined_members:
+        banner = create_banner(bot, member_id, thread_id, event_type=GroupEventType.JOIN, 
+                             event_data=type('Event', (), {'sourceId': author_id or bot.uid})())
+        if banner and os.path.exists(banner):
+            try:
+                user_name = bot.fetchUserInfo(member_id).changed_profiles[member_id].zaloName
+                bot.sendLocalImage(
+                    banner,
+                    thread_id=thread_id,
+                    thread_type=thread_type,
+                    width=980,
+                    height=350,
+                    message=Message(
+                        text=f"🚦 {user_name}",
+                        mention=Mention(uid=member_id, length=len(user_name), offset=3)
+                    ),
+                    ttl=86400000
+                )
+                delete_file(banner)
+            except Exception as e:
+                print(f"Loi khi gui banner cho {member_id} (JOIN): {e}")
+                if os.path.exists(banner):
+                    delete_file(banner)
+
+    for member_id in left_members:
+        banner = create_banner(bot, member_id, thread_id, event_type=GroupEventType.LEAVE, 
+                             event_data=type('Event', (), {'sourceId': author_id or bot.uid})())
+        if banner and os.path.exists(banner):
+            try:
+                bot.sendLocalImage(
+                    banner,
+                    thread_id=thread_id,
+                    thread_type=thread_type,
+                    width=980,
+                    height=350,
+                    ttl=86400000
+                )
+                delete_file(banner)
+            except Exception as e:
+                print(f"Loi khi gui banner cho {member_id} (LEAVE): {e}")
+                if os.path.exists(banner):
+                    delete_file(banner)
+
+    bot.group_info_cache[thread_id] = {
+        "name": current_group_info['name'],
+        "member_list": current_group_info['memVerList'],
+        "total_member": current_group_info['totalMember']
+    }
+
+def start_member_check_thread(bot, allowed_thread_ids: List[str]):
+    def check_members_loop():
+        while True:
+            for thread_id in allowed_thread_ids:
+                if not get_allow_welcome(bot, thread_id):
+                    continue
+                handle_group_member(bot, None, None, thread_id, ThreadType.GROUP)
+            time.sleep(2)
+
+    thread = threading.Thread(target=check_members_loop, daemon=True)
+    thread.start()

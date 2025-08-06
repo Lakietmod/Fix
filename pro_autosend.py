@@ -6,8 +6,9 @@ from zlapi.models import *
 import pytz
 import requests
 import json
-from core.bot_sys import get_user_name_by_id, read_settings, write_settings
+from core.bot_sys import get_user_name_by_id, read_settings, write_settings, is_admin
 
+# Nội dung của time_poems và các hàm khác giữ nguyên như bạn đã cung cấp
 time_poems = {
     "01:00": [
         "🌙✨ Đêm khuya vang, giấc mơ đây, ngủ ngon nhé!",
@@ -205,16 +206,21 @@ time_poems = {
 
 vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
 
-def handle_autosend_on(bot, thread_id, author_id):
+def handle_autosend_on(bot, thread_id, author_id, prefix):
     """Bật tính năng autosend cho thread"""
     settings = read_settings(bot.uid)
     if "autosend" not in settings:
         settings["autosend"] = {}
+    
+    if settings["autosend"].get(thread_id, False):
+        return f"🚦 Lệnh autosend đã được bật trước đó rồi ✅\n➜ Sử dụng: {prefix}autosend status để kiểm tra!"
+    
     settings["autosend"][thread_id] = True
     write_settings(bot.uid, settings)
+    
     return f"🚦 Lệnh autosend đã được Bật 🚀 trong nhóm này ✅"
 
-def handle_autosend_off(bot, thread_id, author_id):
+def handle_autosend_off(bot, thread_id, author_id, prefix):
     """Tắt tính năng autosend cho thread"""
     settings = read_settings(bot.uid)
     if "autosend" in settings and thread_id in settings["autosend"]:
@@ -240,8 +246,8 @@ def list_autosend_groups(bot):
                 group_info = bot.fetchGroupInfo(thread_id)
                 group_name = group_info.gridInfoMap.get(thread_id, {}).get('name', f'Group_{thread_id}')
                 active_groups.append(f"📌 {group_name} - ID: {thread_id}")
-            except:
-                active_groups.append(f"📌 Unknown Group - ID: {thread_id}")
+            except Exception as e:
+                active_groups.append(f"📌 Unknown Group - ID: {thread_id} (Lỗi: {e})")
     
     if active_groups:
         return f"🚦 Danh sách nhóm đã bật autosend:\n" + "\n".join(active_groups)
@@ -272,6 +278,7 @@ def autosend_task(client):
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
                 }
                 
+                # IMPROVEMENT: Added more specific error handling for network and data issues.
                 try:
                     response = requests.get(listvd, headers=headers, timeout=10)
                     response.raise_for_status()
@@ -279,8 +286,20 @@ def autosend_task(client):
                     if not urls:
                         raise ValueError("Danh sách video rỗng")
                     video_url = random.choice(urls)
+                except requests.RequestException as e:
+                    print(f"❌ Lỗi mạng khi lấy danh sách video: {e}")
+                    time.sleep(30)
+                    continue
+                except json.JSONDecodeError as e:
+                    print(f"❌ Lỗi giải mã JSON từ danh sách video: {e}")
+                    time.sleep(30)
+                    continue
+                except ValueError as e:
+                    print(f"❌ Lỗi dữ liệu video: {e}")
+                    time.sleep(30)
+                    continue
                 except Exception as e:
-                    print(f"❌ Lỗi khi lấy danh sách video: {e}")
+                    print(f"❌ Lỗi không xác định khi lấy video: {e}")
                     time.sleep(30)
                     continue
                 
@@ -288,7 +307,7 @@ def autosend_task(client):
                 try:
                     video_check = requests.head(video_url, headers=headers, timeout=5)
                     if video_check.status_code != 200:
-                        raise ValueError(f"Video URL không hợp lệ: {video_url}")
+                        raise ValueError(f"Video URL không hợp lệ (status: {video_check.status_code}): {video_url}")
                 except Exception as e:
                     print(f"❌ Video URL không khả dụng: {e}")
                     time.sleep(30)
@@ -321,23 +340,24 @@ def autosend_task(client):
                                 ttl=3600000
                             )
                             last_sent_time[thread_id] = now
-                            print(f"✅ Đã gửi tin nhắn đến {thread_id}")
-                            time.sleep(0.3)  # Delay để tránh spam API
+                            print(f"✅ Đã gửi tin nhắn tự động đến {thread_id}")
+                            time.sleep(0.5)  # Delay nhẹ để tránh bị giới hạn API
                         except Exception as e:
-                            print(f"❌ Lỗi khi gửi tin nhắn đến {thread_id}: {e}")
+                            print(f"❌ Lỗi khi gửi tin nhắn tự động đến {thread_id}: {e}")
                             
         except Exception as e:
-            print(f"❌ Lỗi trong autosend_task: {e}")
+            print(f"❌ Lỗi nghiêm trọng trong vòng lặp autosend_task: {e}")
             
         time.sleep(30)  # Kiểm tra mỗi 30 giây
 
-def start_autosend_handle(client, thread_type, message_object, message, thread_id, prefix, author_id):
+# NOTE: Since the logic for this function was moved into main.py, this function is likely no longer used.
+# However, it is kept here in case it's called from another part of the bot.
+def handle_autosend_command(bot, message_object, thread_id, thread_type, message, prefix, author_id):
     """Xử lý lệnh autosend"""
-    from core.bot_sys import is_admin
     
     # Kiểm tra quyền admin
-    if not is_admin(client, author_id):
-        client.replyMessage(
+    if not is_admin(bot, author_id):
+        bot.replyMessage(
             Message(text="❌ Bạn không có quyền sử dụng lệnh này!"), 
             message_object, 
             thread_id=thread_id, 
@@ -355,49 +375,43 @@ def start_autosend_handle(client, thread_type, message_object, message, thread_i
             f"➜ {prefix}autosend status - Xem trạng thái\n"
             f"➜ {prefix}autosend list - Danh sách nhóm đã bật"
         )
-        client.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
+        bot.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
         return
     
     action = parts[1].lower()
     
     if action == "on":
-        response = handle_autosend_on(client, thread_id, author_id)
-        client.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
-        
-        # Khởi động autosend thread nếu chưa có
-        if not hasattr(client, 'autosend_thread') or not client.autosend_thread.is_alive():
-            client.autosend_thread = threading.Thread(target=autosend_task, args=(client,), daemon=True)
-            client.autosend_thread.start()
-            print("✅ Autosend thread đã được khởi động!")
+        response = handle_autosend_on(bot, thread_id, author_id, prefix)
+        bot.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
             
     elif action == "off":
-        response = handle_autosend_off(client, thread_id, author_id)
-        client.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
+        response = handle_autosend_off(bot, thread_id, author_id, prefix)
+        bot.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
         
     elif action == "status":
-        status = get_autosend_status(client, thread_id)
+        status = get_autosend_status(bot, thread_id)
         status_text = "🟢 Đang bật" if status else "🔴 Đang tắt"
         
         try:
-            group_info = client.fetchGroupInfo(thread_id)
+            group_info = bot.fetchGroupInfo(thread_id)
             group_name = group_info.gridInfoMap.get(thread_id, {}).get('name', 'Unknown Group')
         except:
             group_name = 'Unknown Group'
             
         response = f"🚦 Trạng thái autosend:\n📌 Nhóm: {group_name}\n🔧 Trạng thái: {status_text}"
-        client.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
+        bot.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
         
     elif action == "list":
-        response = list_autosend_groups(client)
-        client.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
+        response = list_autosend_groups(bot)
+        bot.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
         
     else:
         response = f"❌ Lệnh không hợp lệ! Sử dụng: {prefix}autosend [on/off/status/list]"
-        client.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
+        bot.replyMessage(Message(text=response), message_object, thread_id=thread_id, thread_type=thread_type)
 
 def start_autosend_thread(client):
     """Khởi động autosend thread khi bot khởi động"""
     if not hasattr(client, 'autosend_thread') or not client.autosend_thread.is_alive():
         client.autosend_thread = threading.Thread(target=autosend_task, args=(client,), daemon=True)
         client.autosend_thread.start()
-        print("✅ Autosend thread đã được khởi động khi bot start!")
+        print("✅ Luồng Autosend đã được khởi động!")

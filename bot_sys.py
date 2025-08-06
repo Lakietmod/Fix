@@ -15,7 +15,7 @@ import sys
 from threading import Thread
 import threading
 import time
-from typing import List, Optional, Tuple
+from typing import List, Optional, Any, Tuple, Dict
 import emoji
 import psutil
 import pytz
@@ -23,20 +23,8 @@ import requests
 from zlapi.models import *
 import json
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import os
-import json
-import time
-import threading
 import logging
-import random
-import pytz
-import colorsys
-import glob
-import requests
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime
-from zlapi import ZaloAPI
-from zlapi.models import ThreadType, Message, Mention
+from zlapi import ZaloAPI, ThreadType, Message, Mention
 
 # Thiết lập logging
 logging.basicConfig(
@@ -49,8 +37,7 @@ logger = logging.getLogger(__name__)
 SETTINGS_FILE = "settings.json"
 ADMIN_CONFIG_FILE = "admin_config.json"
 AUTOSEND_CONFIG_FILE = "autosend_config.json"
-is_admin = "552782355350996128"  # ID admin c
-# ============== DÒNG IMPORT GÂY LỖI VÒNG TRÒN ĐÃ BỊ XÓA KHỎI ĐÂY ==============
+is_admin = "552782355350996128" # ID admin chính (cần thay đổi)
 
 BACKGROUND_PATH = "background/"
 CACHE_PATH = "modules/cache/"
@@ -200,335 +187,26 @@ def start_member_check_thread(bot, allowed_thread_ids):
     thread = threading.Thread(target=check_members, daemon=True)
     thread.start()
 
-# ================ AUTOSEND SYSTEM - FIXED ================
-
-class AutoSendManager:
-    """Quản lý hệ thống AutoSend đã được fix lỗi"""
-    
-    def __init__(self, bot):
-        self.bot = bot
-        self.autosend_threads = {}
-        self.autosend_settings = {}
-        self.is_running = {}
-        self.load_autosend_config()
-        
-    def load_autosend_config(self):
-        """Load cấu hình AutoSend"""
-        try:
-            if os.path.exists(AUTOSEND_CONFIG_FILE):
-                with open(AUTOSEND_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                    self.autosend_settings = json.load(f)
-        except Exception as e:
-            logger.error(f"Lỗi khi load config AutoSend: {e}")
-            self.autosend_settings = {}
-    
-    def save_autosend_config(self):
-        """Lưu cấu hình AutoSend"""
-        try:
-            with open(AUTOSEND_CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.autosend_settings, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Lỗi khi lưu config AutoSend: {e}")
-    
-    def start_autosend(self, thread_id: str, interval: int, content_type: str, content_data: Any):
-        """Bắt đầu AutoSend cho thread"""
-        try:
-            # Dừng autosend cũ nếu có
-            self.stop_autosend(thread_id)
-            
-            # Tạo cấu hình mới
-            self.autosend_settings[thread_id] = {
-                'interval': interval,
-                'content_type': content_type,
-                'content_data': content_data,
-                'enabled': True,
-                'last_sent': 0
-            }
-            
-            # Lưu cấu hình
-            self.save_autosend_config()
-            
-            # Bắt đầu thread mới
-            self.is_running[thread_id] = True
-            thread = threading.Thread(
-                target=self._autosend_worker,
-                args=(thread_id,),
-                daemon=True
-            )
-            thread.start()
-            self.autosend_threads[thread_id] = thread
-            
-            logger.info(f"✅ Bắt đầu AutoSend cho thread {thread_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Lỗi khi bắt đầu AutoSend: {e}")
-            return False
-    
-    def stop_autosend(self, thread_id: str):
-        """Dừng AutoSend cho thread"""
-        try:
-            self.is_running[thread_id] = False
-            
-            if thread_id in self.autosend_settings:
-                self.autosend_settings[thread_id]['enabled'] = False
-                self.save_autosend_config()
-            
-            if thread_id in self.autosend_threads:
-                del self.autosend_threads[thread_id]
-            
-            logger.info(f"🛑 Dừng AutoSend cho thread {thread_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Lỗi khi dừng AutoSend: {e}")
-            return False
-    
-    def _autosend_worker(self, thread_id: str):
-        """Worker thread cho AutoSend"""
-        while self.is_running.get(thread_id, False):
-            try:
-                if thread_id not in self.autosend_settings:
-                    break
-                
-                config = self.autosend_settings[thread_id]
-                if not config.get('enabled', False):
-                    break
-                
-                current_time = time.time()
-                last_sent = config.get('last_sent', 0)
-                interval = config.get('interval', 300)  # Default 5 phút
-                
-                if current_time - last_sent >= interval:
-                    self._send_autosend_content(thread_id, config)
-                    config['last_sent'] = current_time
-                    self.save_autosend_config()
-                
-                time.sleep(10)  # Check mỗi 10 giây
-                
-            except Exception as e:
-                logger.error(f"Lỗi trong AutoSend worker {thread_id}: {e}")
-                time.sleep(30)  # Đợi 30s trước khi thử lại
-    
-    def _send_autosend_content(self, thread_id: str, config: Dict):
-        """Gửi nội dung AutoSend"""
-        try:
-            content_type = config.get('content_type', 'text')
-            content_data = config.get('content_data', [])
-            
-            if not content_data:
-                return
-            
-            if content_type == 'text':
-                message = random.choice(content_data)
-                self.bot.sendMessage(message, thread_id, ThreadType.GROUP)
-                
-            elif content_type == 'image':
-                image_url = random.choice(content_data)
-                self.bot.sendRemoteImage(image_url, thread_id=thread_id, thread_type=ThreadType.GROUP)
-                
-            elif content_type == 'sticker':
-                sticker = random.choice(content_data)
-                self.bot.sendSticker(
-                    sticker['stickerType'], 
-                    sticker['stickerId'], 
-                    sticker.get('cateId', ''), 
-                    thread_id, 
-                    ThreadType.GROUP
-                )
-                
-            elif content_type == 'mixed':
-                content = random.choice(content_data)
-                if content['type'] == 'text':
-                    self.bot.sendMessage(content['data'], thread_id, ThreadType.GROUP)
-                elif content['type'] == 'image':
-                    self.bot.sendRemoteImage(content['data'], thread_id=thread_id, thread_type=ThreadType.GROUP)
-                    
-            logger.info(f"📤 Đã gửi AutoSend tới {thread_id}")
-            
-        except Exception as e:
-            logger.error(f"Lỗi khi gửi AutoSend content: {e}")
-    
-    def get_autosend_status(self, thread_id: str) -> Dict:
-        """Lấy trạng thái AutoSend"""
-        if thread_id in self.autosend_settings:
-            config = self.autosend_settings[thread_id].copy()
-            config['is_running'] = self.is_running.get(thread_id, False)
-            return config
-        return {'enabled': False, 'is_running': False}
-
-# Global AutoSend Manager
-autosend_managers = {}
-
-def get_autosend_manager(bot) -> AutoSendManager:
-    """Lấy AutoSend Manager cho bot"""
-    if bot.uid not in autosend_managers:
-        autosend_managers[bot.uid] = AutoSendManager(bot)
-    return autosend_managers[bot.uid]
-
-def start_autosend_thread(bot):
-    """Khởi tạo AutoSend thread cho bot"""
-    try:
-        manager = get_autosend_manager(bot)
-        
-        # Khởi động lại các AutoSend đã lưu
-        for thread_id, config in manager.autosend_settings.items():
-            if config.get('enabled', False):
-                manager.start_autosend(
-                    thread_id,
-                    config.get('interval', 300),
-                    config.get('content_type', 'text'),
-                    config.get('content_data', [])
-                )
-        
-        logger.info(f"✅ Khởi tạo AutoSend Manager cho bot {bot.uid}")
-        
-    except Exception as e:
-        logger.error(f"Lỗi khi khởi tạo AutoSend thread: {e}")
-
-def handle_autosend_command(bot, message_object, author_id, thread_id, thread_type, message):
-    """Xử lý lệnh AutoSend"""
-    try:
-        if not is_admin(bot, author_id):
-            bot.replyMessage(
-                Message(text="❌ Bạn không có quyền sử dụng lệnh này!"),
-                message_object, thread_id, thread_type
-            )
-            return
-        
-        manager = get_autosend_manager(bot)
-        parts = message.strip().split()
-        
-        if len(parts) < 2:
-            # Hiển thị menu AutoSend
-            show_autosend_menu(bot, message_object, thread_id, thread_type, manager)
-            return
-        
-        command = parts[1].lower()
-        
-        if command == "on":
-            # Bật AutoSend
-            if len(parts) < 3:
-                bot.replyMessage(
-                    Message(text="❌ Cú pháp: /autosend on [interval_minutes]"),
-                    message_object, thread_id, thread_type
-                )
-                return
-            
-            try:
-                interval_minutes = int(parts[2])
-                interval_seconds = interval_minutes * 60
-                
-                # Default content - có thể thay đổi
-                default_content = [
-                    "🤖 AutoSend đang hoạt động!",
-                    "💬 Tin nhắn tự động từ bot",
-                    "🔄 Hệ thống AutoSend"
-                ]
-                
-                success = manager.start_autosend(thread_id, interval_seconds, 'text', default_content)
-                
-                if success:
-                    bot.replyMessage(
-                        Message(text=f"✅ Đã bật AutoSend với chu kỳ {interval_minutes} phút!"),
-                        message_object, thread_id, thread_type
-                    )
-                else:
-                    bot.replyMessage(
-                        Message(text="❌ Lỗi khi bật AutoSend!"),
-                        message_object, thread_id, thread_type
-                    )
-                    
-            except ValueError:
-                bot.replyMessage(
-                    Message(text="❌ Chu kỳ phải là số nguyên (phút)!"),
-                    message_object, thread_id, thread_type
-                )
-        
-        elif command == "off":
-            # Tắt AutoSend
-            success = manager.stop_autosend(thread_id)
-            
-            if success:
-                bot.replyMessage(
-                    Message(text="🛑 Đã tắt AutoSend!"),
-                    message_object, thread_id, thread_type
-                )
-            else:
-                bot.replyMessage(
-                    Message(text="❌ Lỗi khi tắt AutoSend!"),
-                    message_object, thread_id, thread_type
-                )
-        
-        elif command == "status":
-            # Kiểm tra trạng thái
-            status = manager.get_autosend_status(thread_id)
-            
-            if status['enabled']:
-                interval_minutes = status.get('interval', 0) // 60
-                is_running = status.get('is_running', False)
-                last_sent = status.get('last_sent', 0)
-                
-                if last_sent > 0:
-                    last_sent_str = datetime.fromtimestamp(last_sent).strftime("%H:%M:%S %d/%m/%Y")
-                else:
-                    last_sent_str = "Chưa gửi"
-                
-                status_text = f"""📊 Trạng thái AutoSend:
-✅ Trạng thái: {'Đang chạy' if is_running else 'Đã dừng'}
-⏰ Chu kỳ: {interval_minutes} phút
-📤 Lần gửi cuối: {last_sent_str}
-📋 Loại nội dung: {status.get('content_type', 'text')}
-📝 Số nội dung: {len(status.get('content_data', []))}"""
-            else:
-                status_text = "❌ AutoSend chưa được kích hoạt!"
-                
-            bot.replyMessage(
-                Message(text=status_text),
-                message_object, thread_id, thread_type
-            )
-            
-    except Exception as e:
-        logger.error(f"Lỗi khi xử lý lệnh AutoSend: {e}")
-        bot.replyMessage(
-            Message(text="❌ Đã xảy ra lỗi khi xử lý lệnh!"),
-            message_object, thread_id, thread_type
-        )
-
-def show_autosend_menu(bot, message_object, thread_id, thread_type, manager):
-    """Hiển thị menu AutoSend"""
-    try:
-        status = manager.get_autosend_status(thread_id)
-        
-        menu_text = f"""🤖 MENU AUTOSEND
-━━━━━━━━━━━━━━━━━━━━━━━━
-📊 Trạng thái: {'✅ Đang chạy' if status.get('is_running', False) else '❌ Đã tắt'}
-
-🔧 Lệnh có sẵn:
-• {bot.prefix}autosend on [phút] - Bật AutoSend
-• {bot.prefix}autosend off - Tắt AutoSend  
-• {bot.prefix}autosend status - Kiểm tra trạng thái
-
-📝 Ví dụ:
-• {bot.prefix}autosend on 30 - Gửi mỗi 30 phút
-• {bot.prefix}autosend off - Tắt AutoSend
-
-⚠️ Chỉ admin mới có thể sử dụng!"""
-
-        bot.replyMessage(
-            Message(text=menu_text),
-            message_object, thread_id, thread_type
-        )
-        
-    except Exception as e:
-        logger.error(f"Lỗi khi hiển thị menu AutoSend: {e}")
-
 # Export các hàm cần thiết
 __all__ = [
     'read_settings', 'write_settings', 'get_allowed_thread_ids',
     'is_admin', 'handle_bot_admin', 'handle_event', 'handle_check_profanity',
     'handle_bot_command', 'initialize_group_info', 'start_member_check_thread',
-    'start_autosend_thread', 'handle_autosend_command', 'get_autosend_manager'
+    'get_user_name_by_id', 'admin_cao', 'bot_on_group', 'bot_off_group', 
+    'add_forbidden_word', 'remove_forbidden_word', 'is_forbidden_word', 
+    'setup_bot_on', 'setup_bot_off', 'check_admin_group', 'get_allow_link_status',
+    'is_spamming', 'check_spam', 'safe_delete_message', 
+    'print_muted_users_in_group', 'ban_users_permanently', 
+    'print_blocked_users_in_group', 'add_users_to_ban_list', 
+    'remove_users_from_ban_list', 'block_users_from_group', 
+    'unblock_users_from_group', 'kick_users_from_group', 
+    'promote_to_admin', 'remove_adminn', 'extract_uids_from_mentions', 
+    'add_admin', 'remove_admin', 'add_skip', 'remove_skip', 
+    'get_blocked_members', 'get_group_admins', 'remove_link', 'newlink', 
+    'list_bots', 'reload_modules', 'get_dominant_color', 
+    'get_contrasting_color', 'random_contrast_color', 'download_avatar', 
+    'generate_menu_image', 'sticker_loop', 'handle_welcome_on', 'handle_welcome_off',
+    'get_allow_welcome', 'handle_group_member'
 ]
 
 def sticker_loop(bot, thread_id, thread_type):
@@ -1520,7 +1198,7 @@ def newlink(bot, thread_id):
     try:
         group_name = bot.fetchGroupInfo(thread_id).gridInfoMap[thread_id].name
         bot.newlink(grid=thread_id)
-        return f"🔗 Link nhom {group_name} đa tao moi ✅"
+        return f"🔗 Link nhom {group.name} đa tao moi ✅"
     except Exception as e:
         return f"❌ Đa xay ra loi khi tao link nhom: {str(e)}"
 
@@ -1984,7 +1662,7 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
             allow_link = settings.get('allow_link', {}).get(str(thread_id), True)
             sos_status = settings.get('sos_status', True)
 
-            status_icon = lambda enabled: "✅" if enabled else "⭕️"
+            status_icon = lambda enabled: "⭕️" if enabled else "✅"
 
             f"{status_icon(spam_enabled)} Anti-Spam 💢\n"
             f"{status_icon(anti_poll)} Anti-Poll 👍\n"
@@ -2084,23 +1762,9 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             response = f"Cú pháp không hợp lệ. Sử dụng:\n{bot.prefix}bot autostk start\n{bot.prefix}bot autostk stop"
                 # =================== BỔ SUNG KHỐI LỆNH BỊ THIẾU ===================
                 elif action == 'autosend':
-                    if not is_admin(bot, author_id):
-                        response = "❌ Bạn không phải admin bot!"
-                    elif len(parts) < 3:
-                        response = f"➜ Vui lòng nhập [on/off] sau lệnh: {bot.prefix}bot autosend 🤧"
-                    else:
-                        sub_action = parts[2].lower()
-                        if sub_action == 'on':
-                            response = handle_autosend_on(bot, thread_id, bot.prefix)
-                            # Bắt đầu luồng nếu nó chưa chạy
-                            if not hasattr(bot, 'autosend_thread_started') or not bot.autosend_thread_started:
-                                bot.autosend_thread = threading.Thread(target=autosend_task, args=(bot,), daemon=True)
-                                bot.autosend_thread.start()
-                                bot.autosend_thread_started = True
-                        elif sub_action == 'off':
-                            response = handle_autosend_off(bot, thread_id, bot.prefix)
-                        else:
-                            response = "➜ Lệnh không hợp lệ. Vui lòng chọn 'on' hoặc 'off'."
+                    # Lệnh này đã được di chuyển ra ngoài hàm onMessage của main
+                    # Vì vậy logic này không cần thiết ở đây nữa
+                    pass
                 # =====================================================================
 
                 elif action == 'policy':
@@ -2235,8 +1899,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 settings['chat_enabled'] = False  
                                 response = f"{status_icon(chat_enabled)} SafeMode 🩹\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot chat {chat_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)  
 
@@ -2260,8 +1922,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 settings['sticker_enabled'] = False  
                                 response = f"{status_icon(sticker_enabled)} Anti-Sticker 😊\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot sticker {sticker_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)
 
@@ -2284,8 +1944,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 settings['doodle_enabled'] = False  
                                 response = f"{status_icon(doodle_enabled)} Anti-Draw ✏️\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot draw {draw_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)
 
@@ -2308,8 +1966,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 settings['gif_enabled'] = False  
                                 response = f"{status_icon(gif_enabled)} Anti-Gif 🖼️\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot gif {gif_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)
 
@@ -2332,8 +1988,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 settings['video_enabled'] = False  
                                 response = f"{status_icon(video_enabled)} Anti-Video ▶️\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot video {video_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)
 
@@ -2356,8 +2010,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 settings['image_enabled'] = False  
                                 response = f"{status_icon(image_enabled)} Anti-Photo 🏖\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot video {image_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)
 
@@ -2380,8 +2032,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 settings['voice_enabled'] = False  
                                 response = f"{status_icon(voice_enabled)} Anti-Voice 🔊\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot video {voice_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)
 
@@ -2405,8 +2055,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 settings['file_enabled'] = False  
                                 response = f"{status_icon(file_enabled)} Anti-File 🗂️\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot video {file_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)
 
@@ -2429,8 +2077,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 settings['card_enabled'] = True  
                                 response = f"{status_icon(card_enabled)} Anti-Card 🛡️\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot card {card_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)
 
@@ -2454,9 +2100,7 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                                 response = "➜ Lenh nay chi kha thi trong nhom 🤧"
                             else:
                                 response = handle_welcome_off(bot, thread_id)
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot welcome {setup_action} khong đuoc ho tro 🤧"
-                
+                        
                 elif action == 'spam':
                     if not is_admin(bot, author_id):
                         response = "❌Ban khong phai admin bot!"
@@ -2475,8 +2119,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                         elif spam_action == 'off':
                             settings['spam_enabled'][thread_id] = False  
                             response = f"{status_icon(spam_enabled)} Anti-Spam 💢\n"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot spam {spam_action} khong hop le 🤧"
                         
                         write_settings(bot.uid, settings)
                 elif action == 'info':
@@ -2531,9 +2173,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                                     response += f"➜   {idx}. {get_user_name_by_id(bot, uid)} - {uid}\n"
                             else:
                                 response = "➜ Khong co Admin BOT nao trong danh sach 🤧"
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot admin {sub_action} khong đuoc ho tro 🤧"
-
 
                 elif action == 'setup':
                     if len(parts) < 3:
@@ -2554,8 +2193,7 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                                 response = "➜ Lenh nay chi kha thi trong nhom 🤧"
                             else:
                                 response = setup_bot_off(bot,thread_id)
-                        else:
-                            response = f"➜ Lenh {bot.prefix}bot setup {setup_action} khong đuoc ho tro 🤧"
+                        
                 elif action == 'link':
                     if len(parts) < 3:
                         response = f"➜ Vui long nhap [on/off] sau lenh: {bot.prefix}bot link 🤧\n➜ Vi du: {bot.prefix}bot link on hoac {bot.prefix}bot link off ✅"
@@ -2578,8 +2216,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             elif link_action == 'off':
                                 settings['allow_link'][thread_id] = False
                                 response = f"{status_icon(allow_link)} Anti-Link 🔗\n"
-                            else:
-                                response = f"➜ Lenh {bot.prefix}bot link {link_action} khong đuoc ho tro 🤧"
                         write_settings(bot.uid, settings)
                 elif action == 'word':
                     if len(parts) < 4:
@@ -2596,8 +2232,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                                 response = add_forbidden_word(bot, author_id, word)
                             elif word_action == 'remove':
                                 response = remove_forbidden_word(bot, author_id, word)
-                            else:
-                                response = f"➜ Lenh [{bot.prefix}bot word {word_action}] khong đuoc ho tro 🤧\n➜ Vi du: {bot.prefix}bot word add [tu khoa] hoac {bot.prefix}bot word remove [tu khoa] ✅"
                 elif action == 'noiquy':
                     settings = read_settings(bot.uid)
                     rules=settings.get("rules", {})
@@ -2649,7 +2283,6 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
                             else:
                                 uids = extract_uids_from_mentions(message_object)
                                 response = add_users_to_ban_list(bot, uids, thread_id, "Quan tri vien cam")
-
 
                 elif action == 'unban':
                     if len(parts) < 3:
@@ -2891,10 +2524,10 @@ def handle_bot_command(bot, message_object, author_id, thread_id, thread_type, c
 font_path_emoji = os.path.join("emoji.ttf")
 font_path_arial = os.path.join("arial unicode ms.otf")
 
-def create_gradient_colors(num_colors: int) -> List[Tuple[int, int, int]]:
+def create_gradient_colors(num_colors: int) -> List[tuple[int, int, int]]:
     return [(random.randint(30, 255), random.randint(30, 255), random.randint(30, 255)) for _ in range(num_colors)]
 
-def interpolate_colors(colors: List[Tuple[int, int, int]], text_length: int, change_every: int) -> List[Tuple[int, int, int]]:
+def interpolate_colors(colors: List[tuple[int, int, int]], text_length: int, change_every: int) -> List[tuple[int, int, int]]:
     gradient = []
     num_segments = len(colors) - 1
     steps_per_segment = max((text_length // change_every) + 1, 1)
@@ -2919,8 +2552,8 @@ def is_emoji(character: str) -> bool:
     return character in emoji.EMOJI_DATA
 
 def create_text(draw: ImageDraw.Draw, text: str, font: ImageFont.FreeTypeFont, 
-                emoji_font: ImageFont.FreeTypeFont, text_position: Tuple[int, int], 
-                gradient_colors: List[Tuple[int, int, int]]):
+                emoji_font: ImageFont.FreeTypeFont, text_position: tuple[int, int], 
+                gradient_colors: List[tuple[int, int, int]]):
     gradient = interpolate_colors(gradient_colors, text_length=len(text), change_every=4)
     current_x = text_position[0]
 
@@ -2938,7 +2571,7 @@ def create_text(draw: ImageDraw.Draw, text: str, font: ImageFont.FreeTypeFont,
 
 def draw_gradient_border(draw: ImageDraw.Draw, center_x: int, center_y: int, 
                         radius: int, border_thickness: int, 
-                        gradient_colors: List[Tuple[int, int, int]]):
+                        gradient_colors: List[tuple[int, int, int]]):
     num_segments = 80
     gradient = interpolate_colors(gradient_colors, num_segments, change_every=10)
 
